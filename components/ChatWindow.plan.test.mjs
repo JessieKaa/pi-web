@@ -13,6 +13,8 @@ test("keeps recognized todos in the transcript after the agent settles", () => {
   assert.match(chat, /visibleWidgets\.filter/);
   assert.match(chat, /subagentTreeVisible/);
   assert.match(chat, /DesktopSubagentWidgetCard/);
+  assert.match(chat, /<DesktopWidgetCards widgets=\{gutterWidgets\}/);
+  assert.match(chat, /gutterDuplicate=\{gutterWidgets.length > 0\}/);
   assert.match(chat, /isPiSubagentWidgetKey/);
   assert.match(chat, /<ConversationPlan[\s\S]*?widget=\{activeConversationPlanWidget\}/);
   assert.match(chat, /activeConversationPlanWidget \? \(/);

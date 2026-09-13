@@ -13,7 +13,7 @@ import { MessageView, ThinkingBlock } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { ConversationPlan, getConversationPlanWidget } from "./ConversationPlan";
-import { filterSubagentWidgets, isPiSubagentWidgetKey } from "./ExtensionWidgets";
+import { DesktopWidgetCards, filterSubagentWidgets, isPiSubagentWidgetKey } from "./ExtensionWidgets";
 import { DesktopSubagentWidgetCard } from "./SubagentSessions";
 import { GoalPanel } from "./GoalPanel";
 import { DialogShell } from "./DialogShell";
@@ -21,7 +21,7 @@ import { filterGoalStatuses, filterGoalWidgets, resolveGoalPanelModel } from "@/
 import { useI18n } from "@/hooks/useI18n";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
-import { useIsMobile, useIsWideDesktop } from "@/hooks/useIsMobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { AppUpdateResponse } from "@/lib/api-types";
 import {
@@ -280,7 +280,6 @@ function useMessageRefs(count: number): RefObject<(HTMLDivElement | null)[]> {
 export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, desktopAside, playDoneSound = () => {}, unlockAudio, subagentMode, subagentTreeVisible = false, tokenSpeedEnabled = true }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
-  const isWideDesktop = useIsWideDesktop();
   const playDoneSoundRef = useRef(playDoneSound);
   playDoneSoundRef.current = playDoneSound;
   const soundedExtensionDialogIdRef = useRef<string | null>(null);
@@ -365,9 +364,19 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const planFooterWidgets = conversationPlanWidget
     ? visibleWidgets.filter((widget) => widget !== conversationPlanWidget)
     : visibleWidgets;
-  const footerWidgets = isWideDesktop
-    ? filterSubagentWidgets(planFooterWidgets)
-    : planFooterWidgets;
+  const gutterWidgets = filterSubagentWidgets(planFooterWidgets);
+  const footerWidgets = gutterWidgets;
+  const contextGutter = desktopAside || subagentWidgets.length > 0 || gutterWidgets.length > 0 ? (
+    <div className="desktop-workspace-context">
+      {desktopAside}
+      {!subagentTreeVisible && subagentWidgets.length > 0 ? (
+        <DesktopSubagentWidgetCard widgets={subagentWidgets} />
+      ) : null}
+      {gutterWidgets.length > 0 ? (
+        <DesktopWidgetCards widgets={gutterWidgets} />
+      ) : null}
+    </div>
+  ) : null;
 
   useEffect(() => {
     if (!extensionDialog || soundedExtensionDialogIdRef.current === extensionDialog.id) return;
@@ -868,6 +877,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       )}
 
       {isEmptyNew ? (
+        <div className="chat-workspace-body">
         <div className="new-session-home flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 py-8">
             <div className="my-auto w-full max-w-[720px] text-center">
@@ -927,8 +937,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               }}
             />
             {chatInputElement}
-            <ExtensionStatusBar statuses={visibleStatuses} widgets={footerWidgets} />
+            <ExtensionStatusBar statuses={visibleStatuses} widgets={footerWidgets} gutterDuplicate={gutterWidgets.length > 0} />
           </div>
+        </div>
+        {contextGutter}
         </div>
       ) : (
       <div className="chat-workspace-body">
@@ -1334,7 +1346,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         </div>,
         document.body,
       )}
-        <ExtensionStatusBar statuses={visibleStatuses} widgets={footerWidgets} />
+        <ExtensionStatusBar statuses={visibleStatuses} widgets={footerWidgets} gutterDuplicate={gutterWidgets.length > 0} />
         </div>
         {isMobile ? null : (
           <Suspense fallback={null}>
@@ -1349,14 +1361,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         )}
         </>
         </div>
-        {desktopAside || subagentWidgets.length > 0 ? (
-          <div className="desktop-workspace-context">
-            {desktopAside}
-            {!subagentTreeVisible && subagentWidgets.length > 0 ? (
-              <DesktopSubagentWidgetCard widgets={subagentWidgets} />
-            ) : null}
-          </div>
-        ) : null}
+        {contextGutter}
       </div>
       )}
     </div>

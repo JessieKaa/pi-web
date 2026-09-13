@@ -313,7 +313,8 @@ body {
   display: flex;
   flex-shrink: 0;
   flex-wrap: wrap;
-  align-items: stretch;
+  align-items: flex-start;
+  align-content: flex-start;
   min-width: 0;
   border-top: 1px solid var(--border);
   background: transparent;
@@ -448,7 +449,7 @@ html.dark .conversation-plan-item[data-status="completed"] .conversation-plan-st
 
 .extension-widget-triggers {
   display: flex;
-  flex: 1 1 100%;
+  flex: 0 0 100%;
   align-items: stretch;
   min-width: 0;
   height: 35px;
@@ -4614,6 +4615,42 @@ span.linenumber {
 .desktop-context-heading > span { min-width: 0; flex: 1; }
 .desktop-context-heading > strong { color: var(--text-muted); font-size: var(--text-meta); line-height: var(--leading-ui); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .desktop-context-heading:hover { background: var(--bg-hover); }
+.desktop-widget-card .desktop-context-heading { cursor: default; }
+.desktop-widget-card .desktop-context-heading:hover { background: transparent; }
+.desktop-widget-card-note { color: var(--text-muted); font-size: var(--text-ui); line-height: var(--leading-ui); }
+.desktop-widget-card .desktop-context-activity {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 12px 10px;
+}
+.desktop-widget-card .desktop-context-activity > * + * { padding-left: 0; border-left: 0; }
+.desktop-widget-card-kicker { color: var(--text-dim); }
+.desktop-widget-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+}
+.desktop-widget-card-row > span:first-child { flex: 0 0 auto; color: var(--text-dim); }
+.desktop-widget-card-row > strong {
+  min-width: 0;
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.desktop-widget-card-row.is-stack { flex-direction: column; align-items: flex-start; gap: 2px; }
+.desktop-widget-card-row.is-stack > strong {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  font-weight: 400;
+  text-align: left;
+}
 .desktop-context-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .desktop-context-capacity { padding: 12px; border-bottom: 1px solid var(--border); }
 .desktop-context-capacity-copy { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
@@ -4873,6 +4910,9 @@ span.subagent-tree-disclosure { cursor: default; }
       gap: 12px;
       flex: 0 0 292px;
       overflow: auto;
+    }
+    .extension-status-shelf.has-gutter-dup {
+      display: none;
     }
   }
   @container chat-center (min-width: 1121px) {

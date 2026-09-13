@@ -48,4 +48,14 @@ test("keeps widgets without rendering the passive status line", () => {
   assert.match(html, /extension-widget-triggers/);
   assert.match(html, /usage/);
   assert.doesNotMatch(html, /extension-status-line|connected/);
+  assert.doesNotMatch(html, /has-gutter-dup/);
+});
+
+test("marks footer widgets that also render in the context gutter", () => {
+  const html = renderStatusBar({
+    statuses: [],
+    gutterDuplicate: true,
+    widgets: [{ key: "workbuddy", lines: ["ok"], placement: "aboveEditor" }],
+  });
+  assert.match(html, /extension-status-shelf has-widgets has-gutter-dup/);
 });

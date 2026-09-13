@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { Puzzle } from "lucide-react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { ExtensionWidgetItem } from "@/lib/types";
 
@@ -25,6 +26,151 @@ export function formatExtensionWidgetContent(lines: string[]): string {
   return lines.join("\n");
 }
 
+const BAR_RE = /^[\s\u2588\u2591\u2592\u2593]+$/;
+const METER_RE = /^(.*?)\s+剩余\s+(\d+)(?:\s*\/\s*(\d+))?$/;
+const ROW_RE = /^(\S+)\s{2,}(.+)$/;
+const SKIP_RE = /^(设置)\s+\//;
+
+export type WidgetCardMeter = { name: string; remain: number; size: number };
+export type WidgetCardRow = { label: string; value: string };
+export type WidgetCardModel = {
+  heading: string;
+  metric: string | null;
+  kicker: string | null;
+  meters: WidgetCardMeter[];
+  rows: WidgetCardRow[];
+  notes: string[];
+};
+
+export function parseExtensionWidgetCard(
+  lines: string[],
+  fallbackTitle: string,
+): WidgetCardModel {
+  const cleaned = lines.map((line) => line.trimEnd()).filter((line) => line.trim() !== "");
+  let heading = fallbackTitle;
+  let kicker: string | null = null;
+  let start = 0;
+  const first = cleaned[0];
+  if (first?.includes(" · ")) {
+    const parts = first.split(" · ");
+    heading = parts[0]?.trim() || heading;
+    kicker = parts.slice(1).join(" · ") || null;
+    start = 1;
+  } else if (first === heading) {
+    start = 1;
+  }
+
+  const meters: WidgetCardMeter[] = [];
+  const rows: WidgetCardRow[] = [];
+  const notes: string[] = [];
+  for (const line of cleaned.slice(start)) {
+    const trimmed = line.trim();
+    if (BAR_RE.test(trimmed) || SKIP_RE.test(trimmed)) continue;
+    const meter = trimmed.match(METER_RE);
+    if (meter) {
+      const remain = Number(meter[2]);
+      meters.push({
+        name: meter[1].trim(),
+        remain,
+        size: meter[3] ? Number(meter[3]) : remain,
+      });
+      continue;
+    }
+    const row = trimmed.match(ROW_RE);
+    if (row) {
+      rows.push({ label: row[1], value: row[2].trim() });
+      continue;
+    }
+    notes.push(trimmed);
+  }
+
+  const credit = rows.find((row) => row.label === "积分");
+  const metric = credit?.value.replace(/^合计\s*/, "") ?? null;
+  return {
+    heading,
+    metric,
+    kicker,
+    meters,
+    rows: rows.filter((row) => row.label !== "积分"),
+    notes,
+  };
+}
+
+function meterTone(remain: number, size: number): string {
+  if (size <= 0 || remain <= 0) return "var(--error)";
+  if (remain / size <= 0.2) return "var(--warning)";
+  return "var(--accent)";
+}
+
+function WidgetCardRowView({ row }: { row: WidgetCardRow }) {
+  const parts = row.value.split(" | ").map((part) => part.trim()).filter(Boolean);
+  const stacked = parts.length > 1 || row.value.length > 22;
+  return (
+    <div className={stacked ? "desktop-widget-card-row is-stack" : "desktop-widget-card-row"}>
+      <span>{row.label}</span>
+      <strong>
+        {parts.length > 1 ? parts.map((part) => <span key={part}>{part}</span>) : row.value}
+      </strong>
+    </div>
+  );
+}
+
+export function DesktopWidgetCards({ widgets }: { widgets: ExtensionWidgetItem[] }) {
+  if (widgets.length === 0) return null;
+  return widgets.map((widget) => {
+    const card = parseExtensionWidgetCard(widget.lines, widget.title ?? widget.key);
+    return (
+      <aside
+        key={widget.key}
+        className="desktop-conversation-context desktop-widget-card"
+        aria-label={card.heading}
+        data-extension-widget-card={widget.key}
+      >
+        <div className="desktop-context-heading">
+          <Puzzle size={14} strokeWidth={1.8} aria-hidden="true" />
+          <span>{card.heading}</span>
+          {card.metric ? <strong>{card.metric}</strong> : null}
+        </div>
+        {card.meters.map((meter) => {
+          const percent = meter.size > 0 ? Math.min(100, (meter.remain / meter.size) * 100) : 0;
+          return (
+            <section key={meter.name} className="desktop-context-capacity">
+              <div className="desktop-context-capacity-copy">
+                <strong>{meter.remain} <small>/ {meter.size}</small></strong>
+                <span>{meter.name}</span>
+              </div>
+              <div
+                className="desktop-context-progress"
+                style={{
+                  "--context-percent": `${percent}%`,
+                  "--context-tone": meterTone(meter.remain, meter.size),
+                } as CSSProperties}
+                aria-label={`${meter.name} ${meter.remain} / ${meter.size}`}
+              >
+                <span />
+              </div>
+            </section>
+          );
+        })}
+        {card.meters.length === 0 && card.notes.length > 0 ? (
+          <section className="desktop-context-capacity">
+            <div className="desktop-widget-card-note">{card.notes.join("\n")}</div>
+          </section>
+        ) : null}
+        {(card.kicker || card.rows.length > 0 || (card.meters.length > 0 && card.notes.length > 0)) ? (
+          <div className="desktop-context-activity">
+            {card.kicker ? <div className="desktop-widget-card-kicker">{card.kicker}</div> : null}
+            {card.rows.map((row) => <WidgetCardRowView key={row.label} row={row} />)}
+            {card.meters.length > 0 ? card.notes.map((note) => (
+              <div key={note} className="desktop-widget-card-kicker">{note}</div>
+            )) : null}
+          </div>
+        ) : null}
+      </aside>
+    );
+  });
+}
+
 export function snapshotExtensionWidgetContents(
   widgets: ExtensionWidgetItem[],
 ): Map<string, string[]> {
@@ -45,7 +191,11 @@ export function getUpdatedExtensionWidgetKeys(
   }).filter((key): key is string => key !== null);
 }
 
-function getDefaultExpandedWidgetKey(widgets: ExtensionWidgetItem[]): string | null {
+function getDefaultExpandedWidgetKey(
+  widgets: ExtensionWidgetItem[],
+  expandFirst = false,
+): string | null {
+  if (expandFirst) return widgets.find((widget) => widget.lines.length > 0)?.key ?? null;
   return widgets.find((widget) => {
     const lineCount = widget.lines.length;
     return lineCount > 1 && lineCount <= DEFAULT_EXPANDED_WIDGET_LINES;
@@ -59,15 +209,16 @@ export function getNextExpandedWidgetKey(
   return currentKey === requestedKey ? null : requestedKey;
 }
 
-export function ExtensionWidgets({ widgets }: {
+export function ExtensionWidgets({ widgets, expandFirst = false }: {
   widgets: ExtensionWidgetItem[];
+  expandFirst?: boolean;
 }) {
   const { t } = useI18n();
   const idPrefix = useId();
   const previousContentsRef = useRef<Map<string, string[]> | null>(null);
   const updateClearTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const [expandedWidgetKey, setExpandedWidgetKey] = useState<string | null>(
-    () => getDefaultExpandedWidgetKey(widgets),
+    () => getDefaultExpandedWidgetKey(widgets, expandFirst),
   );
   const [updatingWidgetKeys, setUpdatingWidgetKeys] = useState<ReadonlySet<string>>(
     () => new Set(),

@@ -10,12 +10,14 @@ const jiti = createJiti(import.meta.url, {
 });
 const {
   DEFAULT_EXPANDED_WIDGET_LINES,
+  DesktopWidgetCards,
   ExtensionWidgets,
   filterSubagentWidgets,
   formatExtensionWidgetContent,
   getNextExpandedWidgetKey,
   getUpdatedExtensionWidgetKeys,
   isPiSubagentWidgetKey,
+  parseExtensionWidgetCard,
   snapshotExtensionWidgetContents,
 } = await jiti.import("./ExtensionWidgets.tsx");
 const { I18nProvider } = await jiti.import("../hooks/useI18n.tsx");
@@ -181,4 +183,85 @@ test("drops pi-subagents TUI widgets while keeping other footer widgets", () => 
     { key: "subagent-fleet-status", lines: ["fleet"], placement: "belowEditor" },
   ];
   assert.deepEqual(filterSubagentWidgets(widgets).map((widget) => widget.key), ["web-activity"]);
+});
+
+test("expandFirst opens the first widget even when it is long", () => {
+  const lines = Array.from({ length: 12 }, (_, index) => `line-${index + 1}`);
+  const html = renderWidgets({
+    expandFirst: true,
+    widgets: [{ key: "long", lines, placement: "aboveEditor" }],
+  });
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /line-1/);
+});
+
+test("parses WorkBuddy widget lines into a context-card model", () => {
+  const card = parseExtensionWidgetCard([
+    "WorkBuddy AI · 国际版 · 仅免费模型",
+    "账号  已登录  u123",
+    "令牌  2027/9/12 16:51:48 过期（自动续期）",
+    "积分  合计 350",
+    "  Bonus Pack  剩余 250 / 250",
+    "  ████████████████████████████",
+    "  Free Plan Subscription  剩余 100 / 100",
+    "  ████████████████████████████",
+    "模型  hy3",
+    "设置  /workbuddy",
+  ], "workbuddy");
+  assert.equal(card.heading, "WorkBuddy AI");
+  assert.equal(card.metric, "350");
+  assert.equal(card.kicker, "国际版 · 仅免费模型");
+  assert.deepEqual(card.meters, [
+    { name: "Bonus Pack", remain: 250, size: 250 },
+    { name: "Free Plan Subscription", remain: 100, size: 100 },
+  ]);
+  assert.deepEqual(card.rows.map((row) => row.label), ["账号", "令牌", "模型"]);
+});
+
+test("renders gutter widgets with the conversation-context card chrome", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(DesktopWidgetCards, {
+      widgets: [{
+        key: "workbuddy",
+        title: "WorkBuddy AI",
+        placement: "aboveEditor",
+        lines: [
+          "WorkBuddy AI · 国际版 · 仅免费模型",
+          "账号  已登录",
+          "积分  合计 350",
+          "  Bonus Pack  剩余 250 / 250",
+        ],
+      }],
+    }),
+  );
+  assert.match(html, /desktop-conversation-context desktop-widget-card/);
+  assert.match(html, /data-extension-widget-card="workbuddy"/);
+  assert.match(html, /WorkBuddy AI/);
+  assert.match(html, /desktop-context-progress/);
+  assert.match(html, /Bonus Pack/);
+  assert.match(html, /desktop-widget-card-row/);
+  assert.doesNotMatch(html, /\u2588/);
+  assert.doesNotMatch(html, /extension-widget-trigger/);
+});
+
+test("stacks long widget values instead of wrapping CJK labels", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(DesktopWidgetCards, {
+      widgets: [{
+        key: "workbuddy",
+        placement: "aboveEditor",
+        lines: [
+          "WorkBuddy AI · 国际版 · 仅免费模型",
+          "账号  已登录",
+          "令牌  2027/9/12 16:51:48 过期（自动续期）",
+          "模型  Deepseek-V4.1-Flash · x0.00 | Hy4 preview · x0.00 | Hy3 · x0.00",
+        ],
+      }],
+    }),
+  );
+  assert.match(html, /desktop-widget-card-kicker/);
+  assert.match(html, /desktop-widget-card-row is-stack/);
+  assert.match(html, /<span>Deepseek-V4.1-Flash · x0.00<\/span>/);
+  assert.match(html, /<span>Hy3 · x0.00<\/span>/);
+  assert.doesNotMatch(html, /账号 <strong>/);
 });

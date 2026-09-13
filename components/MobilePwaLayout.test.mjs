@@ -49,7 +49,7 @@ test("keeps the composer symmetric now that the minimap sits outside the column"
   assert.match(chatInputSource, /padding: compact \? 0 : "0 16px 8px",/);
   assert.doesNotMatch(chatWindowSource, /minimapOffset/);
   assert.match(chatWindowSource, /const ChatMinimap = lazy\(\(\) => import\("\.\/ChatMinimap"\)\.then\(/);
-  assert.match(chatWindowSource, /<ChatMinimap[\s\S]*desktop-workspace-context/);
+  assert.match(chatWindowSource, /<ChatMinimap[\s\S]*\{contextGutter\}/);
 });
 
 test("prevents iOS focus zoom from widening the layout", () => {
@@ -90,6 +90,10 @@ test("hides the extension status shelf while the mobile keyboard is open", () =>
   assert.match(viewportHookSource, /classList\.add\("keyboard-open"\)/);
   assert.match(viewportHookSource, /classList\.remove\("keyboard-open"\)/);
   assert.match(cssSource, /html\.keyboard-open \.extension-status-shelf \{[\s\S]*?display:\s*none/);
+  assert.match(cssSource, /\.extension-status-shelf\.has-gutter-dup \{[\s\S]*?display:\s*none/);
+  assert.match(cssSource, /\.desktop-widget-card \.desktop-context-heading/);
+  assert.match(cssSource, /\.desktop-widget-card-row\.is-stack/);
+  assert.match(cssSource, /\.extension-widget-triggers \{[\s\S]*?flex:\s*0 0 100%/);
   assert.match(cssSource, /\.extension-widget-triggers \{[\s\S]*?overflow-x:\s*auto/);
   assert.match(cssSource, /\.extension-widget-triggers::-webkit-scrollbar-corner \{[\s\S]*?display:\s*none/);
 });

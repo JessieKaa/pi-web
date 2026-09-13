@@ -18,9 +18,10 @@ test("desktop workspace exposes a transcript and a bounded context gutter", () =
 
 test("context gutter is a sibling of the chat column, not stacked under the composer", () => {
   const main = chat.indexOf('className="chat-workspace-main"');
-  const aside = chat.indexOf("className=\"desktop-workspace-context\"");
-  assert.ok(main >= 0 && aside > main);
-  assert.match(chat, /desktopAside \|\| subagentWidgets\.length > 0/);
+  const gutter = chat.indexOf("{contextGutter}", main);
+  assert.ok(main >= 0 && gutter > main);
+  assert.match(chat, /desktopAside \|\| subagentWidgets\.length > 0 \|\| gutterWidgets\.length > 0/);
+  assert.match(chat, /<DesktopWidgetCards widgets=\{gutterWidgets\}/);
 });
 
 test("context card is absent until the center column has enough real width", () => {
