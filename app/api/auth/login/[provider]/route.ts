@@ -1,7 +1,7 @@
 import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { randomBytes } from "node:crypto";
 import { invalidateModelsCache } from "@/lib/models-cache";
+import { createListedModelRuntime } from "@/lib/provider-listing-runtime";
 
 
 // In-memory registry: loginToken -> resolve/reject for the manualCodeInput promise
@@ -59,7 +59,7 @@ export async function GET(
 
   const stream = new ReadableStream({
     async start(controller) {
-      const modelRuntime = await ModelRuntime.create();
+      const modelRuntime = await createListedModelRuntime();
       if (!modelRuntime.getProvider(provider)?.auth.oauth) {
         send(controller, { type: "error", message: `Unknown provider: ${provider}` });
         controller.close();

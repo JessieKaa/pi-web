@@ -1,5 +1,19 @@
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { homedir } from "node:os";
+import { createAgentSessionServices, getAgentDir, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ProviderCredentialType, ProviderListingInput } from "@/lib/provider-listing";
+
+/**
+ * Settings/auth APIs used to call `ModelRuntime.create()` directly, which never
+ * loads `~/.pi/agent/extensions`. Chat sessions do via `createAgentSessionServices`.
+ * Use this so OAuth providers registered by extensions (e.g. WorkBuddy) appear.
+ */
+export async function createListedModelRuntime(): Promise<ModelRuntime> {
+  const { modelRuntime } = await createAgentSessionServices({
+    cwd: homedir(),
+    agentDir: getAgentDir(),
+  });
+  return modelRuntime;
+}
 
 /**
  * Adapter between `ModelRuntime` and the pure listing helpers in
