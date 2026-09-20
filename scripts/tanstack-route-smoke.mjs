@@ -1,5 +1,5 @@
 /**
- * Shared safe route matrix for the 47 TanStack API adapters.
+ * Shared safe route matrix for the 48 TanStack API adapters.
  *
  * Used identically by standalone and installed-package smoke runs. Never
  * mutates user state: write endpoints are probed with invalid bodies
@@ -147,6 +147,11 @@ export async function smokeAllRoutes({ origin, authHeaders = {} }) {
       body: "{}",
     });
     await probe("POST", "/api/auth/logout/github", [400, 404]);
+    await probe("GET", "/api/cache-warming", [200]);
+    await probe("PUT", "/api/cache-warming", [400], {
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
     await probe("GET", `/api/cwd/browse?path=${encodeURIComponent(fixtureDir)}`, [200]);
     await probe("POST", "/api/cwd/browse", [400], {
       headers: { "content-type": "application/json" },

@@ -23,6 +23,7 @@ export const API_ROUTE_METHODS: Record<string, readonly string[]> = {
   "/api/auth/login/$provider": ["GET", "POST"],
   "/api/auth/logout/$provider": ["POST"],
   "/api/auth/providers": ["GET"],
+  "/api/cache-warming": ["GET", "PUT"],
   "/api/cwd/browse": ["GET", "POST"],
   "/api/cwd/validate": ["POST"],
   "/api/default-cwd": ["POST"],

@@ -106,6 +106,13 @@ test("settings owns general preferences", () => {
   assert.doesNotMatch(settings, /<svg/);
 });
 
+test("cache warming is a pi setting owned by the general section", () => {
+  assert.match(settings, /fetch\(`\/api\/cache-warming\$\{query\}`\)/);
+  assert.match(settings, /body: JSON\.stringify\(\{ mode, cwd: cwd \?\? undefined \}\)/);
+  assert.match(settings, /aria-checked=\{cacheWarmingMode === mode\}/);
+  assert.match(settings, /CACHE_WARMING_OPTIONS: CacheWarmingMode\[\] = \["off", "streaming", "idle"\]/);
+});
+
 test("AppShell owns the token-speed preference like completion sound", () => {
   assert.match(shell, /useTokenSpeedPreference/);
   assert.match(shell, /tokenSpeedEnabled=\{tokenSpeedEnabled\}/);

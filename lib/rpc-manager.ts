@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme } from "@earendil-works/pi-coding-agent";
+import type { CacheWarmingMode } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
@@ -1828,6 +1829,30 @@ function trackStartingSession(cwd: string): () => void {
 
 export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
   return getRegistry().get(sessionId);
+}
+
+/**
+ * Cache warming is a pi-wide setting (0.86), read from the global settings file.
+ * `cwd` only affects project-level overrides.
+ */
+export function getRpcCacheWarmingMode(cwd?: string): CacheWarmingMode {
+  const registry = globalThis.__piSessions;
+  for (const wrapper of registry?.values() ?? []) {
+    if (wrapper.isAlive()) return wrapper.inner.settingsManager.getCacheWarmingMode();
+  }
+  return SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).getCacheWarmingMode();
+}
+
+/** Persist the mode and apply it to every live session, so no restart is needed. */
+export function applyRpcCacheWarmingMode(mode: CacheWarmingMode, cwd?: string): number {
+  let applied = 0;
+  for (const wrapper of getRegistry().values()) {
+    if (!wrapper.isAlive()) continue;
+    wrapper.inner.setCacheWarmingMode(mode);
+    applied += 1;
+  }
+  if (applied === 0) SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).setCacheWarmingMode(mode);
+  return applied;
 }
 
 export async function refreshRpcSessionModelConfigs(): Promise<number> {

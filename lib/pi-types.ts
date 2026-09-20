@@ -1,6 +1,7 @@
 import type {
   AgentSessionEvent,
   BashOperations,
+  CacheWarmingMode,
   SessionManager,
   SettingsManager,
   SlashCommandInfo,
@@ -150,6 +151,8 @@ export interface AgentSessionLike {
   };
   readonly sessionManager: SessionManager;
   readonly settingsManager: SettingsManager;
+  /** Pi 0.86 cache warming: persists the mode and re-arms the running warmer. */
+  setCacheWarmingMode: (mode: CacheWarmingMode) => void;
   readonly agent: {
     state?: {
       systemPrompt?: string;

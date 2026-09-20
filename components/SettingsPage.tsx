@@ -20,6 +20,7 @@ import {
   Plug,
   SlidersHorizontal,
   Sun,
+  ThermometerSun,
   Volume2,
   X,
 } from "lucide-react";
@@ -44,6 +45,17 @@ import {
 } from "@/lib/thinking-expansion-preference";
 
 type SettingsSection = "general" | "remote" | "archived" | "models" | "skills" | "plugins" | "subagents";
+
+// Pi 0.86's cache-warming profiles (CACHE_WARMING_MODES); "idle" also warms between agent runs.
+type CacheWarmingMode = "off" | "streaming" | "idle";
+
+const CACHE_WARMING_OPTIONS: CacheWarmingMode[] = ["off", "streaming", "idle"];
+
+const CACHE_WARMING_LABELS: Record<CacheWarmingMode, string> = {
+  off: "settings.cacheWarmingOff",
+  streaming: "settings.cacheWarmingStreaming",
+  idle: "settings.cacheWarmingIdle",
+};
 
 interface Props {
   cwd: string | null;
@@ -116,10 +128,36 @@ export function SettingsPage({
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [cacheWarmingMode, setCacheWarmingMode] = useState<CacheWarmingMode | null>(null);
 
   useEffect(() => {
     setThinkingExpanded(isThinkingExpandedByDefault());
   }, []);
+
+  // Cache warming lives in pi's global settings, not in browser storage.
+  useEffect(() => {
+    let cancelled = false;
+    const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
+    fetch(`/api/cache-warming${query}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { mode?: CacheWarmingMode } | null) => {
+        if (!cancelled && data?.mode) setCacheWarmingMode(data.mode);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [cwd]);
+
+  const handleCacheWarmingChange = useCallback((mode: CacheWarmingMode) => {
+    setCacheWarmingMode(mode);
+    // The route also applies the mode to live sessions, so no restart is needed.
+    fetch("/api/cache-warming", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode, cwd: cwd ?? undefined }),
+    }).catch(() => {});
+  }, [cwd]);
 
   const close = useCallback(() => {
     onModelsChanged();
@@ -310,6 +348,16 @@ export function SettingsPage({
           }} title={t("settings.thinkingExpandedDefault")}>
             <span /><Brain size={15} aria-hidden="true" />
           </button>
+        </section>
+        <section className="settings-form-section">
+          <div className="settings-form-label"><ThermometerSun size={16} aria-hidden="true" /><div><strong>{t("settings.cacheWarming")}</strong><span>{t("settings.cacheWarmingDescription")}</span></div></div>
+          <div className="settings-segmented" role="radiogroup" aria-label={t("settings.cacheWarming")}>
+            {CACHE_WARMING_OPTIONS.map((mode) => (
+              <button key={mode} type="button" role="radio" aria-checked={cacheWarmingMode === mode} data-active={cacheWarmingMode === mode} onClick={() => handleCacheWarmingChange(mode)}>
+                <span>{t(CACHE_WARMING_LABELS[mode])}</span>
+              </button>
+            ))}
+          </div>
         </section>
         <section className="settings-form-section">
           <div className="settings-form-label"><MessageSquare size={16} aria-hidden="true" /><div><strong>{t("settings.chat")}</strong><span>{t("settings.quoteSelection")}</span></div></div>
