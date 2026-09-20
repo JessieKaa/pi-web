@@ -39,6 +39,11 @@ import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-sett
 import { SubagentQueue } from "./subagent-queue";
 import { addWorktree, removeWorktree } from "./worktree";
 import { randomUUID } from "node:crypto";
+import {
+  createSystemPromptOverride,
+  createSystemPromptOverrideExtension,
+  type SystemPromptOverride,
+} from "./system-prompt-override";
 
 interface HostSession {
   readonly inner: AgentSessionLike;
@@ -53,7 +58,11 @@ export interface SubagentRuntimeDependencies {
   getSession(sessionId: string): HostSession | undefined;
   registerSession(
     inner: AgentSessionLike,
-    options?: { exactSystemPrompt?: string; chatOnly?: boolean },
+    options?: {
+      exactSystemPrompt?: string;
+      chatOnly?: boolean;
+      systemPromptOverride?: SystemPromptOverride;
+    },
   ): void;
   reopenSession(sessionId: string, sessionFile: string): Promise<HostSession>;
   resolveSessionPath(sessionId: string): Promise<string | null>;
@@ -246,6 +255,13 @@ export function createSubagentController(
       });
       const { chatOnly, appendSystemPrompt, delegatedTask } = promptPlan;
       if (!chatOnly) initTheme();
+      // Pi 0.86 forces the prompt from a `before_agent_start` handler, so the same holder object
+      // must reach both the child's resource loader and the host wrapper below. A chat-only child
+      // (no tools) gets its profile prompt here too, which is what the old preflight write did.
+      const systemPromptOverride = createSystemPromptOverride();
+      if (promptPlan.exactSystemPrompt !== undefined) {
+        systemPromptOverride.forced = promptPlan.exactSystemPrompt;
+      }
       const services = await createAgentSessionServices({
         cwd: childCwd,
         agentDir,
@@ -257,12 +273,7 @@ export function createSubagentController(
           noPromptTemplates: true,
           noThemes: true,
           noContextFiles: true,
-          ...(chatOnly || promptPlan.exactSystemPrompt !== undefined
-            ? {
-                systemPrompt: " ",
-                systemPromptOverride: () => undefined,
-              }
-            : {}),
+          extensionFactories: [createSystemPromptOverrideExtension(systemPromptOverride)],
           appendSystemPrompt,
         },
         ...((profile.loadExtensions || profile.loadSkills)
@@ -328,6 +339,7 @@ export function createSubagentController(
           ? { exactSystemPrompt: promptPlan.exactSystemPrompt }
           : {}),
         chatOnly,
+        systemPromptOverride,
       });
 
       const initialRun: SubagentRunInfo = {
@@ -410,18 +422,7 @@ export function createSubagentController(
         notifyProgress(request, stored.run, () => dependencies.invalidateSessionList());
         let result: SubagentRunInfo;
         try {
-          await inner.prompt(delegatedTask, {
-            source: "rpc",
-            ...(chatOnly
-              ? {
-                  preflightResult: (success: boolean) => {
-                    if (success && inner.agent.state) {
-                      inner.agent.state.systemPrompt = profile.systemPrompt;
-                    }
-                  },
-                }
-              : {}),
-          });
+          await inner.prompt(delegatedTask, { source: "rpc" });
           const text = inner.getLastAssistantText()?.trim();
           const aborted = stored.abortRequested && !maxTurnsReached;
           result = {

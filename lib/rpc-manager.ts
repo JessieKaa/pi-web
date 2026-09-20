@@ -37,6 +37,7 @@ import {
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { createReasoningRouterExtension } from "./reasoning-router";
+import { createSystemPromptOverride, createSystemPromptOverrideExtension, type SystemPromptOverride } from "./system-prompt-override";
 import { isSessionLeaseActive, leaseExpiresAt } from "./session-liveness";
 
 // ============================================================================
@@ -148,7 +149,7 @@ const CODING_TOOL_NAMES = CODING_BUILTIN_TOOLS;
 // Extensions require a complete Theme, while the web UI applies its own styling.
 class PlainTextTheme extends Theme {
   constructor() {
-    // ponytail: Theme 0.85.1 still falls back missing keys; add keys if ctor grows
+    // ponytail: Theme 0.86 still falls back missing keys; add keys if ctor grows
     super(
       { muted: "", text: "", thinkingXhigh: "", searchMatchText: "" } as ConstructorParameters<typeof Theme>[0],
       { selectedBg: "" } as ConstructorParameters<typeof Theme>[1],
@@ -220,7 +221,10 @@ export class AgentSessionWrapper {
   private liveSubagentSessionIds: string[] = [];
   private uiPromptDepth = 0;
 
-  constructor(public readonly inner: AgentSessionLike) {}
+  constructor(
+    public readonly inner: AgentSessionLike,
+    private readonly systemPromptOverride: SystemPromptOverride = createSystemPromptOverride(),
+  ) {}
 
   getLiveSubagentSessionIds(): string[] {
     return this.liveSubagentSessionIds;
@@ -278,12 +282,12 @@ export class AgentSessionWrapper {
 
   setForceEmptySystemPrompt(force: boolean): void {
     this.forceEmptySystemPrompt = force;
-    this.applyForcedEmptySystemPrompt();
+    this.syncSystemPromptOverride();
   }
 
   setExactSystemPrompt(prompt: string): void {
     this.exactSystemPrompt = prompt;
-    this.applyForcedEmptySystemPrompt();
+    this.syncSystemPromptOverride();
   }
 
   beginExtensionBinding(options: ExtensionBindingOptions = {}): void {
@@ -299,7 +303,7 @@ export class AgentSessionWrapper {
   private ensureExtensionsBound(options: ExtensionBindingOptions = {}): Promise<void> {
     if (options.forceEmptySystemPrompt) this.forceEmptySystemPrompt = true;
     if (this.extensionsBound) {
-      this.applyForcedEmptySystemPrompt();
+      this.syncSystemPromptOverride();
       return Promise.resolve();
     }
     if (this.extensionBindingPromise) return this.extensionBindingPromise;
@@ -338,7 +342,7 @@ export class AgentSessionWrapper {
         this.inner.extensionRunner.setUIContext?.(uiContext, "rpc");
       }
       this.extensionsBound = true;
-      this.applyForcedEmptySystemPrompt();
+      this.syncSystemPromptOverride();
       console.log(`[pi-web] session_start dispatched to extensions for session ${this.inner.sessionId}`);
     })().catch((err) => {
       this.extensionBindingError = err;
@@ -491,16 +495,10 @@ export class AgentSessionWrapper {
   }
 
 
-  private applyForcedEmptySystemPrompt(): void {
-    if (!this.inner.agent.state) return;
+  private syncSystemPromptOverride(): void {
     // An exact prompt (a subagent profile's snapshot) outranks the empty-prompt rule.
-    if (this.exactSystemPrompt !== null) {
-      this.inner.agent.state.systemPrompt = this.exactSystemPrompt;
-      return;
-    }
-    if (this.forceEmptySystemPrompt) {
-      this.inner.agent.state.systemPrompt = "";
-    }
+    this.systemPromptOverride.forced = this.exactSystemPrompt
+      ?? (this.forceEmptySystemPrompt ? "" : null);
   }
 
   private emit(event: AgentEvent): void {
@@ -957,7 +955,7 @@ export class AgentSessionWrapper {
         const toolNames = command.toolNames as string[];
         this.setForceEmptySystemPrompt(toolNames.length === 0);
         this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
-        this.applyForcedEmptySystemPrompt();
+        this.syncSystemPromptOverride();
         return null;
       }
 
@@ -985,7 +983,7 @@ export class AgentSessionWrapper {
         if (typeof this.inner.bindExtensions !== "function") {
           this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
         }
-        this.applyForcedEmptySystemPrompt();
+        this.syncSystemPromptOverride();
         invalidateModelsCache();
         return { success: true };
       }
@@ -1716,7 +1714,7 @@ export class AgentSessionWrapper {
             this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
           },
         });
-        this.applyForcedEmptySystemPrompt();
+        this.syncSystemPromptOverride();
       },
     };
   }
@@ -1761,7 +1759,12 @@ function getRegistry(): Map<string, AgentSessionWrapper> {
 const SUBAGENT_CONTROLLER = createSubagentController({
   getSession: (sessionId) => getRpcSession(sessionId),
   registerSession: (inner, options) => {
-    const wrapper = new AgentSessionWrapper(inner);
+    // The controller creates the child with the matching override holder; without it the
+    // wrapper's own holder is inert (nothing registered the handler) but harmless.
+    const wrapper = new AgentSessionWrapper(
+      inner,
+      options?.systemPromptOverride ?? createSystemPromptOverride(),
+    );
     if (options?.exactSystemPrompt !== undefined) {
       wrapper.setExactSystemPrompt(options.exactSystemPrompt);
     }
@@ -2055,6 +2058,10 @@ export async function startRpcSession(
     installEmbeddedHostCompat();
     const reasoningRouter = createReasoningRouterExtension();
     const embeddedHost = createEmbeddedHostCompatExtension({ cwd: sessionCwd });
+    // Pi 0.86 forces prompts from a `before_agent_start` handler; this holder is the live value
+    // the wrapper writes (chat-only sessions empty it, subagent profiles replace it).
+    const systemPromptOverride = createSystemPromptOverride();
+    const systemPromptOverrideExtension = createSystemPromptOverrideExtension(systemPromptOverride);
     const settingsManager = SettingsManager.create(sessionCwd, agentDir);
     const services = await createAgentSessionServices({
       cwd: sessionCwd,
@@ -2067,16 +2074,12 @@ export async function startRpcSession(
             noPromptTemplates: true,
             noThemes: true,
             noContextFiles: true,
-            ...(chatOnly
-              ? {
-                  systemPrompt: " ",
-                  systemPromptOverride: () => undefined,
-                }
-              : {}),
+            extensionFactories: [systemPromptOverrideExtension],
             appendSystemPrompt: subagentResources.appendSystemPrompt,
           }
         : {
             extensionFactories: [
+              systemPromptOverrideExtension,
               createProjectCommandBashExtension({
                 cwd: sessionCwd,
                 settings: settingsManager,
@@ -2152,10 +2155,10 @@ export async function startRpcSession(
       throw error;
     }
 
-    const wrapper = new AgentSessionWrapper(inner);
+    const wrapper = new AgentSessionWrapper(inner, systemPromptOverride);
     // When all tools are disabled, clear the system prompt entirely.
-    // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
-    // keep this forced after extension resource discovery and reloads as well.
+    // Pi always renders a non-empty prompt even with no tools; the override handler keeps it
+    // forced after extension resource discovery and reloads as well.
     if (toolNames?.length === 0 || chatOnly) {
       wrapper.setForceEmptySystemPrompt(true);
     }
