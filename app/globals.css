@@ -2827,64 +2827,111 @@ html.dark .settings-inline-success { color: var(--ok); }
   outline-offset: 2px;
 }
 
-.settings-archived-list {
-  display: flex;
-  flex-direction: column;
-}
+/* Archived settings: Codex-density rows, not cards (see DESIGN.md row language). */
+.settings-archived-group { padding-top: 4px; }
 
-.settings-archived-row {
-  min-height: 68px;
+.settings-archived-group-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 13px 0;
+  gap: 8px;
+  margin: 0;
+  padding: 16px 8px 8px;
   border-bottom: 1px solid var(--border);
-}
-
-.settings-archived-row > div {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.settings-archived-row strong {
   color: var(--text);
   font-size: var(--text-ui);
   font-weight: var(--weight-medium);
 }
 
-.settings-archived-row span {
+.settings-archived-count {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  font-weight: 400;
+}
+
+.settings-archived-list {
+  display: flex;
+  flex-direction: column;
+  padding-top: 4px;
+}
+
+.settings-archived-row {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px 0 8px;
+  border-radius: 5px;
+}
+
+.settings-archived-row:hover { background: var(--bg-hover); }
+
+.settings-archived-item {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.settings-archived-item strong {
+  min-width: 0;
+  max-width: 60%;
   overflow: hidden;
-  color: var(--text-muted);
+  color: var(--text);
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Paths are data: monospace and quiet. They fill the leftover space and
+   truncate first, so a long title never pushes the row apart. */
+.settings-archived-item span {
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
   font-size: var(--text-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.settings-archived-row button {
-  min-height: 32px;
+.settings-archived-meta {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+}
+
+.settings-archived-action {
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  gap: 7px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
   border-radius: 5px;
-  background: var(--bg-panel);
-  color: var(--text);
+  background: none;
+  color: var(--text-muted);
   font: inherit;
   font-size: var(--text-ui);
   cursor: pointer;
 }
 
-.settings-archived-row button:hover { background: var(--bg-hover); }
-.settings-archived-row button:disabled { cursor: wait; opacity: .6; }
-.settings-archived-row button:focus-visible {
+.settings-archived-action:hover { background: var(--bg-selected); color: var(--text); }
+.settings-archived-action:disabled { cursor: wait; opacity: .6; }
+.settings-archived-action:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .settings-archived-row { min-height: 44px; }
+  .settings-archived-action { height: 44px; padding: 0 12px; }
 }
 
 .settings-form-section select:focus-visible,
@@ -2984,12 +3031,17 @@ html.dark .settings-inline-success { color: var(--ok); }
   }
 
   .settings-archived-row {
-    align-items: stretch;
+    min-height: 44px;
+    align-items: flex-start;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
+    padding: 8px;
   }
 
-  .settings-archived-row button { align-self: flex-start; }
+  .settings-archived-item { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .settings-archived-item strong { max-width: 100%; }
+  .settings-archived-item span { flex: 0 1 auto; max-width: 100%; }
+  .settings-archived-action { align-self: flex-start; height: 32px; }
 
   .settings-form-section select,
   .settings-project-path code {

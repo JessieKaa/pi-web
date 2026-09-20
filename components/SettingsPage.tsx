@@ -27,6 +27,7 @@ import {
 import { useI18n } from "@/hooks/useI18n";
 import type { ThemePreference } from "@/hooks/useTheme";
 import type { Locale, LocalePlugin } from "@/lib/i18n/types";
+import { formatRelativeTime } from "@/lib/i18n/format";
 import { readArchivedSessionIds, writeArchivedSessionIds } from "@/lib/archived-sessions";
 import { sidebarSessionTitle } from "@/lib/codex-sidebar-search";
 import type { ProjectPreference } from "@/lib/project-registry";
@@ -384,30 +385,64 @@ export function SettingsPage({
         ) : (
           <>
             {archivedProjects.length > 0 && (
-              <>
-                <div className="settings-form-heading"><div><h3>{t("sidebar.archivedProjects")}</h3><p>{t("settings.archivedProjectsDescription")}</p></div></div>
+              <section className="settings-archived-group">
+                <h4 className="settings-archived-group-title">
+                  {t("sidebar.archivedProjects")}
+                  <span className="settings-archived-count">{archivedProjects.length}</span>
+                </h4>
                 <div className="settings-archived-list">
-                  {archivedProjects.map((project) => (
-                    <div className="settings-archived-row" key={project.path}>
-                      <div><strong>{project.name ?? project.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? project.path}</strong><span title={project.path}>{project.path}</span></div>
-                      <button type="button" disabled={restoringProjects.has(project.path)} onClick={() => void restoreProject(project.path)}><ArchiveRestore size={14} aria-hidden="true" />{t("sidebar.restoreProject")}</button>
-                    </div>
-                  ))}
+                  {archivedProjects.map((project) => {
+                    const name = project.name ?? project.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? project.path;
+                    return (
+                      <div className="settings-archived-row" key={project.path}>
+                        <div className="settings-archived-item">
+                          <strong title={name}>{name}</strong>
+                          <span title={project.path}>{project.path}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="settings-archived-action"
+                          disabled={restoringProjects.has(project.path)}
+                          aria-label={`${t("sidebar.restoreProject")}: ${name}`}
+                          onClick={() => void restoreProject(project.path)}
+                        >
+                          <ArchiveRestore size={14} aria-hidden="true" />{t("sidebar.restoreProject")}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
-              </>
+              </section>
             )}
             {archivedSessions.length > 0 && (
-              <>
-                <div className="settings-form-heading"><div><h3>{t("sidebar.archivedSessions")}</h3><p>{t("settings.archivedSessionsDescription")}</p></div></div>
+              <section className="settings-archived-group">
+                <h4 className="settings-archived-group-title">
+                  {t("sidebar.archivedSessions")}
+                  <span className="settings-archived-count">{archivedSessions.length}</span>
+                </h4>
                 <div className="settings-archived-list">
-                  {archivedSessions.map((session) => (
-                    <div className="settings-archived-row" key={session.id}>
-                      <div><strong>{sidebarSessionTitle(session)}</strong><span title={session.cwd}>{session.cwd}</span></div>
-                      <button type="button" onClick={() => restoreSession(session.id)}><ArchiveRestore size={14} aria-hidden="true" />{t("sidebar.restoreSession")}</button>
-                    </div>
-                  ))}
+                  {archivedSessions.map((session) => {
+                    const title = sidebarSessionTitle(session);
+                    return (
+                      <div className="settings-archived-row" key={session.id}>
+                        <div className="settings-archived-item">
+                          <strong title={title}>{title}</strong>
+                          <span title={session.cwd}>{session.cwd}</span>
+                        </div>
+                        <span className="settings-archived-meta">{formatRelativeTime(session.modified, locale)}</span>
+                        <button
+                          type="button"
+                          className="settings-archived-action"
+                          aria-label={`${t("sidebar.restoreSession")}: ${title}`}
+                          onClick={() => restoreSession(session.id)}
+                        >
+                          <ArchiveRestore size={14} aria-hidden="true" />{t("sidebar.restoreSession")}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
-              </>
+              </section>
             )}
           </>
         )}

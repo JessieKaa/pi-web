@@ -95,6 +95,21 @@ test("settings lists archived projects and restores them through the project reg
   assert.match(settings, /sidebar\.restoreSession/);
 });
 
+// The archived page is a Codex-density row list: group labels carry the counts,
+// the page heading owns the explanatory copy, and each row names its own action.
+test("archived settings render compact rows with counts", () => {
+  for (const className of ["settings-archived-group-title", "settings-archived-count", "settings-archived-item", "settings-archived-meta", "settings-archived-action"]) {
+    assert.match(settings, new RegExp(`className="[^"]*${className}`), `component does not use ${className}`);
+    assert.match(styles, new RegExp(`\\.${className}[\\s,{:.]`), `globals.css does not style ${className}`);
+  }
+  assert.match(settings, /className="settings-archived-count">\{archivedProjects\.length\}/);
+  assert.match(settings, /className="settings-archived-count">\{archivedSessions\.length\}/);
+  assert.match(settings, /formatRelativeTime\(session\.modified, locale\)/);
+  assert.match(settings, /aria-label=\{`\$\{t\("sidebar\.restoreSession"\)\}: \$\{title\}`\}/);
+  assert.doesNotMatch(settings, /settings\.archivedProjectsDescription|settings\.archivedSessionsDescription/);
+  assert.match(styles, /@media \(pointer: coarse\) \{\n  \.settings-archived-row \{ min-height: 44px; \}/);
+});
+
 test("settings owns general preferences", () => {
   assert.match(settings, /useState<SettingsSection>\("general"\)/);
   assert.match(settings, /onThemeChange\(id\)/);
