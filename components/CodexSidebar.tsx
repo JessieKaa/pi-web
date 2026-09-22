@@ -62,6 +62,7 @@ const COLLAPSED_STORAGE_KEY = "pi-web:collapsed-projects";
 const PROJECT_DISCLOSURE_INITIALIZED_KEY = "pi-web:project-disclosure-initialized";
 const UNREAD_STORAGE_KEY = "pi-web:unread-session-ids";
 const RECENT_OPEN_STORAGE_KEY = "pi-web:recent-open";
+const PROJECTS_OPEN_STORAGE_KEY = "pi-web:projects-open";
 
 function readStringSet(key: string): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -93,14 +94,22 @@ function hasStorageValue(key: string): boolean {
   }
 }
 
-function readRecentOpen(): boolean {
+function readSectionOpen(key: string): boolean {
   if (typeof window === "undefined") return true;
   try {
-    const value = localStorage.getItem(RECENT_OPEN_STORAGE_KEY);
+    const value = localStorage.getItem(key);
     return value === null ? true : value === "1";
   } catch {
     return true;
   }
+}
+
+function readRecentOpen(): boolean {
+  return readSectionOpen(RECENT_OPEN_STORAGE_KEY);
+}
+
+function readProjectsOpen(): boolean {
+  return readSectionOpen(PROJECTS_OPEN_STORAGE_KEY);
 }
 
 function projectName(path: string): string {
@@ -191,6 +200,7 @@ export function CodexSidebar({
   const [worktreeProjectRoot, setWorktreeProjectRoot] = useState<string | null>(null);
   const [worktreeOpen, setWorktreeOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(readRecentOpen);
+  const [projectsOpen, setProjectsOpen] = useState(readProjectsOpen);
   const [worktreeBusy, setWorktreeBusy] = useState(false);
   const [worktreeError, setWorktreeError] = useState<string | null>(null);
   const [pendingConfirmation, setPendingConfirmation] = useState<{ type: "worktree"; path: string } | null>(null);
@@ -270,6 +280,13 @@ export function CodexSidebar({
       // Browser storage is best-effort.
     }
   }, [recentOpen]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(PROJECTS_OPEN_STORAGE_KEY, projectsOpen ? "1" : "0");
+    } catch {
+      // Browser storage is best-effort.
+    }
+  }, [projectsOpen]);
   useEffect(() => { writeArchivedSessionIds(archivedIds); }, [archivedIds]);
   useEffect(() => { setArchivedIds(readArchivedSessionIds()); }, [refreshKey]);
 
@@ -797,7 +814,11 @@ export function CodexSidebar({
       </section>
 
       <section className="codex-sidebar-section">
-        <div className="codex-sidebar-workspace-title">{t("sidebar.projects")}</div>
+        <button type="button" className="codex-sidebar-section-heading codex-sidebar-workspace-title" onClick={() => setProjectsOpen((open) => !open)} aria-expanded={projectsOpen}>
+          <Chevron open={projectsOpen} />
+          <span>{t("sidebar.projects")}</span>
+        </button>
+        {projectsOpen && (
         <div className="codex-sidebar-project-list" role="list">
           {loading && (
             <div className="codex-sidebar-skeleton" aria-busy="true" aria-label={t("sidebar.loading")}>
@@ -944,6 +965,7 @@ export function CodexSidebar({
             );
           })}
         </div>
+        )}
       </section>
       </div>
 

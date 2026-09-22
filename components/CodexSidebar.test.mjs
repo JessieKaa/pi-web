@@ -162,12 +162,21 @@ test("recent and projects share one navigation scroll surface", () => {
 test("project actions stay at the top; only the heading sits with the list", () => {
   const toolbarIndex = sidebar.indexOf('className="codex-sidebar-workspace-toolbar"');
   const recentIndex = sidebar.indexOf('className="codex-sidebar-section codex-sidebar-recent"');
-  const headingIndex = sidebar.indexOf('className="codex-sidebar-workspace-title"');
+  const headingIndex = sidebar.indexOf('className="codex-sidebar-section-heading codex-sidebar-workspace-title"');
   const projectIndex = sidebar.indexOf('className="codex-sidebar-project-list"');
   assert.ok(toolbarIndex >= 0 && recentIndex >= 0 && headingIndex >= 0 && projectIndex >= 0);
   assert.ok(toolbarIndex < recentIndex, "search/add/hide should stay above recent");
   assert.ok(recentIndex < headingIndex, "projects heading should follow recent");
   assert.ok(headingIndex < projectIndex, "projects heading should sit above the project list");
+});
+
+test("projects section is collapsible and persists like recent", () => {
+  assert.match(sidebar, /const \[projectsOpen, setProjectsOpen\] = useState\(readProjectsOpen\)/);
+  assert.match(sidebar, /onClick=\{\(\) => setProjectsOpen\(\(open\) => !open\)\}/);
+  assert.match(sidebar, /aria-expanded=\{projectsOpen\}/);
+  assert.match(sidebar, /\{projectsOpen && \([\s\S]*?className="codex-sidebar-project-list"/);
+  assert.match(sidebar, /pi-web:projects-open/);
+  assert.match(sidebar, /localStorage\.setItem\(PROJECTS_OPEN_STORAGE_KEY, projectsOpen \? "1" : "0"\)/);
 });
 
 test("project rows expand to list their sessions", () => {
