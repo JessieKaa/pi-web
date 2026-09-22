@@ -3,8 +3,11 @@ import {
   type AgentMessage,
   type AgentOptions,
   type AgentTool,
+  type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
+import type { AgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { resolveVisibleModels } from "./model-scope";
 
 const TITLE_TIMEOUT_MS = 90_000;
 const MAX_TITLE_LENGTH = 80;
@@ -29,6 +32,19 @@ export interface GeneratedSessionTitle {
   };
 }
 
+/**
+ * Optional temporary model/thinking pair for title generation.
+ *
+ * Only the temporary Agent's `initialState.model` and
+ * `initialState.thinkingLevel` change. The source Agent/Session state and its
+ * chat JSONL are never touched, because title generation never calls
+ * `setModel()` / `setThinkingLevel()` on the session.
+ */
+export interface SessionTitleModelOverride {
+  model: Model<Api>;
+  thinkingLevel?: ThinkingLevel;
+}
+
 function createShadowTools(tools: AgentTool[]): AgentTool[] {
   return tools.map((tool) => ({
     ...tool,
@@ -43,13 +59,16 @@ function createShadowTools(tools: AgentTool[]): AgentTool[] {
  * the source Agent. Tool implementations are replaced without changing their
  * names, descriptions, or schemas, so a naming run cannot mutate the project.
  */
-export function buildSessionTitleAgentOptions(source: Agent): AgentOptions {
+export function buildSessionTitleAgentOptions(
+  source: Agent,
+  override?: SessionTitleModelOverride,
+): AgentOptions {
   const state = source.state;
   return {
     initialState: {
       systemPrompt: state.systemPrompt,
-      model: state.model,
-      thinkingLevel: state.thinkingLevel,
+      model: override?.model ?? state.model,
+      thinkingLevel: override?.thinkingLevel ?? state.thinkingLevel,
       tools: createShadowTools(state.tools),
       messages: state.messages,
     },
@@ -208,7 +227,10 @@ export function sanitizeTitleMessages(messages: AgentMessage[]): AgentMessage[] 
   return sanitized;
 }
 
-export async function generateSessionTitle(source: AgentSession): Promise<GeneratedSessionTitle> {
+export async function generateSessionTitle(
+  source: AgentSession,
+  override?: SessionTitleModelOverride,
+): Promise<GeneratedSessionTitle> {
   const sourceAgent = source.agent;
   await sourceAgent.waitForIdle();
 
@@ -220,7 +242,7 @@ export async function generateSessionTitle(source: AgentSession): Promise<Genera
     throw new Error("The session has no user messages to name");
   }
 
-  const options = buildSessionTitleAgentOptions(sourceAgent);
+  const options = buildSessionTitleAgentOptions(sourceAgent, override);
   options.initialState!.messages = sanitizedMessages;
   const continuesFromTrailingUser = sanitizedMessages.at(-1)?.role === "user";
   if (continuesFromTrailingUser) {
@@ -252,4 +274,83 @@ export async function generateSessionTitle(source: AgentSession): Promise<Genera
   }
 
   return getAssistantResult(temporaryAgent, historyLength);
+}
+
+/**
+ * Structural shape of the persisted title-generation preference. Keeping this
+ * structural means the resolver does not need to import the settings module,
+ * so it can be unit tested independently and merged with the settings work
+ * package without a hard cycle.
+ */
+export interface TitleGenerationPreferenceLike {
+  provider: string;
+  modelId: string;
+  thinkingLevel?: string | null;
+}
+
+export type TitleGenerationFallbackReason =
+  | "not-configured"
+  | "model-not-found"
+  | "model-out-of-scope"
+  | "thinking-level-unsupported";
+
+export interface ResolvedSessionTitleOverride {
+  override?: SessionTitleModelOverride;
+  usedConfiguredPreference: boolean;
+  fallbackReason?: TitleGenerationFallbackReason;
+}
+
+/**
+ * Resolve a configured title-generation preference against the session's live
+ * runtime and `enabledModels` scope.
+ *
+ * A preference is only applied when the model still exists in the current
+ * runtime, is visible in the current `enabledModels` scope, and (when set) its
+ * thinking level is supported by that model. Otherwise the caller keeps using
+ * the source session's own model and thinking level.
+ */
+export async function resolveSessionTitleOverride(
+  preference: TitleGenerationPreferenceLike | null | undefined,
+  modelRuntime: ModelRuntime,
+  enabledModels: readonly string[] | undefined,
+): Promise<ResolvedSessionTitleOverride> {
+  if (!preference?.provider || !preference.modelId) {
+    return { usedConfiguredPreference: false, fallbackReason: "not-configured" };
+  }
+
+  // A stale model id is the cheapest failure to detect, so check it before
+  // asking the runtime to enumerate every available model.
+  if (!modelRuntime.getModel(preference.provider, preference.modelId)) {
+    return { usedConfiguredPreference: false, fallbackReason: "model-not-found" };
+  }
+
+  const scope = await resolveVisibleModels(
+    modelRuntime,
+    enabledModels ? [...enabledModels] : undefined,
+  );
+  const model = scope.visible.find(
+    (candidate) =>
+      candidate.provider === preference.provider && candidate.id === preference.modelId,
+  );
+  if (!model) {
+    return { usedConfiguredPreference: false, fallbackReason: "model-out-of-scope" };
+  }
+
+  const requestedThinking = preference.thinkingLevel ?? undefined;
+  if (
+    requestedThinking !== undefined
+    && !getSupportedThinkingLevels(model).includes(requestedThinking as ThinkingLevel)
+  ) {
+    return { usedConfiguredPreference: false, fallbackReason: "thinking-level-unsupported" };
+  }
+
+  return {
+    override: {
+      model,
+      ...(requestedThinking !== undefined
+        ? { thinkingLevel: requestedThinking as ThinkingLevel }
+        : {}),
+    },
+    usedConfiguredPreference: true,
+  };
 }
