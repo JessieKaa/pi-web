@@ -453,8 +453,11 @@ const HistoryTranscript = memo(function HistoryTranscript({
     );
   };
 
-  const rendered = plan.items.map((item) => renderItem(item));
-  const { startIndex, hasMore } = getVisibleRenderWindow(rendered.length, visibleCount);
+  const { startIndex, hasMore } = getVisibleRenderWindow(plan.items.length, visibleCount);
+  // Slice the visible descriptor window first so invisible plan entries never
+  // reach renderItem (and therefore never allocate transcript JSX).
+  const visibleItems = plan.items.slice(startIndex);
+  const rendered = visibleItems.map((item) => renderItem(item));
   const showSentinel = hasMore || historyHasMore;
   return (
     <>
@@ -482,7 +485,7 @@ const HistoryTranscript = memo(function HistoryTranscript({
           {t("chat.loadEarlier", { count: hasMore ? startIndex : SESSION_MESSAGE_WINDOW })}
         </button>
       )}
-      {rendered.slice(startIndex)}
+      {rendered}
     </>
   );
 
