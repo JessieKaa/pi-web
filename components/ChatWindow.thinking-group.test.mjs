@@ -7,9 +7,16 @@ const source = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf
 test("folds contiguous completed thinking blocks into one group", () => {
   assert.match(source, /function ThinkingDetailsGroup\(/);
   assert.match(source, /const flushThinking = \(\) =>/);
-  assert.match(source, /if \(segments\.length === 1\)/);
+  assert.match(source, /const thinkingView = segments\.length === 1 \?/);
   assert.match(source, /<ThinkingDetailsGroup segments=\{segments\}/);
   assert.match(source, /if \(group\.thinking\) \{[\s\S]*?thinkingSegments\.push\(/);
+});
+
+test("nests thinking disclosures inside a tool-process disclosure", () => {
+  assert.match(source, /let hasToolProcess = false;/);
+  assert.match(source, /if \(hasToolProcess\) \{\s*if \(processViews\.length === 0\) processKey = `thinking-\$\{thinkingKey\}`;\s*processRefIdx \?\?= refIndex;\s*processViews\.push\(thinkingView\);/);
+  assert.match(source, /<ProcessDetailsGroup messageCount=\{processMessageCount\}/);
+  assert.match(source, /if \(!hasToolProcess\) flushProcess\(\);/);
 });
 
 test("keeps thinking groups bounded by process and non-assistant messages", () => {

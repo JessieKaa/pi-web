@@ -1152,8 +1152,21 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 const finalAnswerMessage = finalSplit.answerBlocks.length > 0 || getAssistantErrorMessage(finalAssistant)
                   ? withAssistantBlocks(finalAssistant, finalSplit.answerBlocks)
                   : null;
+                let hasToolProcess = false;
+                for (let processIdx = userIdx + 1; processIdx <= finalAssistantIdx; processIdx++) {
+                  const processMessage = messages[processIdx];
+                  if (processMessage.role !== "assistant") continue;
+                  const blocks = processIdx === finalAssistantIdx
+                    ? finalSplit.processBlocks
+                    : getDisplayableAssistantBlocks(processMessage);
+                  if (countToolCallBlocks(blocks) > 0) {
+                    hasToolProcess = true;
+                    break;
+                  }
+                }
 
                 let processViews: ReactNode[] = [];
+                let processMessageCount = 0;
                 let processToolCount = 0;
                 let processRefIdx: number | undefined;
                 let processKey = "";
@@ -1170,12 +1183,13 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                       key={`process-group-${processKey}`}
                       ref={refIndex === undefined ? undefined : (el) => { messageRefs.current[refIndex] = el; }}
                     >
-                      <ProcessDetailsGroup messageCount={processViews.length} toolCallCount={processToolCount} hasError={hasError} t={t}>
+                      <ProcessDetailsGroup messageCount={processMessageCount} toolCallCount={processToolCount} hasError={hasError} t={t}>
                         {processViews}
                       </ProcessDetailsGroup>
                     </div>,
                   );
                   processViews = [];
+                  processMessageCount = 0;
                   processToolCount = 0;
                   processRefIdx = undefined;
                   processHasError = false;
@@ -1184,17 +1198,23 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                   if (thinkingSegments.length === 0) return;
                   const segments = thinkingSegments;
                   const refIndex = thinkingRefIdx;
-                  if (segments.length === 1) {
-                    const segment = segments[0]!;
-                    rendered.push(
-                      <div key={`thinking-${thinkingKey}`} style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }} ref={refIndex === undefined ? undefined : (el) => { messageRefs.current[refIndex] = el; }}>
-                        <ThinkingBlock block={segment.block} blockIndex={segment.blockIndex} entryId={segment.entryId} sessionId={segment.sessionId} duration={segment.duration} cwd={messageCwd} onOpenFile={onOpenFile} />
-                      </div>,
-                    );
+                  const thinkingView = segments.length === 1 ? (
+                    <div key={`thinking-${thinkingKey}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <ThinkingBlock block={segments[0]!.block} blockIndex={segments[0]!.blockIndex} entryId={segments[0]!.entryId} sessionId={segments[0]!.sessionId} duration={segments[0]!.duration} cwd={messageCwd} onOpenFile={onOpenFile} />
+                    </div>
+                  ) : (
+                    <div key={`thinking-group-${thinkingKey}`}>
+                      <ThinkingDetailsGroup segments={segments} cwd={messageCwd} onOpenFile={onOpenFile} />
+                    </div>
+                  );
+                  if (hasToolProcess) {
+                    if (processViews.length === 0) processKey = `thinking-${thinkingKey}`;
+                    processRefIdx ??= refIndex;
+                    processViews.push(thinkingView);
                   } else {
                     rendered.push(
-                      <div key={`thinking-group-${thinkingKey}`} style={{ marginBottom: 16 }} ref={refIndex === undefined ? undefined : (el) => { messageRefs.current[refIndex] = el; }}>
-                        <ThinkingDetailsGroup segments={segments} cwd={messageCwd} onOpenFile={onOpenFile} />
+                      <div style={{ marginBottom: 16 }} ref={refIndex === undefined ? undefined : (el) => { messageRefs.current[refIndex] = el; }}>
+                        {thinkingView}
                       </div>,
                     );
                   }
@@ -1203,15 +1223,16 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                   thinkingKey = "";
                 };
 
-                // Keep contiguous reasoning outside the process folds. The
-                // accumulator crosses assistant entries but flushes as soon as
-                // a tool, text, custom entry, or other message interrupts it.
+                // A tool-using process is one outer disclosure. Consecutive
+                // reasoning stays in it as its own inner disclosure; a
+                // reasoning-only turn keeps its existing standalone layout.
                 for (let processIdx = userIdx + 1; processIdx <= finalAssistantIdx; processIdx++) {
                   const processMessage = messages[processIdx];
                   const messageKey = entryIds[processIdx] ?? processIdx;
                   if (processMessage.role === "custom") {
                     flushThinking();
                     if (processViews.length === 0) processKey = String(messageKey);
+                    processMessageCount += 1;
                     processViews.push(renderMessage(processIdx, { attachRef: false, keyPrefix: "process" }));
                     continue;
                   }
@@ -1227,7 +1248,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     const blockIndex = processMessage.content.indexOf(group.blocks[0]);
                     const key = `${messageKey}-${blockIndex}`;
                     if (group.thinking) {
-                      flushProcess();
+                      if (!hasToolProcess) flushProcess();
                       const previousTimestamp = (messages[processIdx - 1] as AgentMessage & { timestamp?: number })?.timestamp;
                       const messageTimestamp = (processMessage as AssistantMessage & { timestamp?: number }).timestamp;
                       const duration = messageTimestamp && previousTimestamp
@@ -1250,6 +1271,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                       flushThinking();
                       if (processViews.length === 0) processKey = key;
                       processRefIdx ??= visibleRefIndexByMessage.get(processIdx);
+                      processMessageCount += 1;
                       processToolCount += countToolCallBlocks(group.blocks);
                       processViews.push(renderMessage(processIdx, {
                         attachRef: false,
