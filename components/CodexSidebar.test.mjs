@@ -137,8 +137,8 @@ test("desktop sidebar exposes new task, projects, and recent sessions", () => {
   assert.match(sidebar, /sidebar\.newTask/);
   assert.match(sidebar, /sidebar\.projects/);
   assert.match(sidebar, /sidebar\.recent/);
-  assert.match(sidebar, /buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds\)/);
-  assert.match(sidebar, /filterRecentProjectGroups\(buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds\), filterQuery\)/);
+  assert.match(sidebar, /buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds, pinnedRecentIds\)/);
+  assert.match(sidebar, /filterRecentProjectGroups\(buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds, pinnedRecentIds\), filterQuery\)/);
   assert.match(sidebar, /recentProjectGroups\.map/);
 });
 
@@ -201,8 +201,10 @@ test("recent sessions are grouped by project and preserve activity and session m
   assert.match(sidebar, /className="codex-recent-project-heading"/);
   assert.match(sidebar, /projectSessions\.map\(\(session\) => \(/);
   assert.match(sidebar, /<SessionRow[\s\S]*?variant="recent"/);
+  assert.match(sidebar, /pinned=\{pinnedRecentIds\.has\(session\.id\)\}/);
+  assert.match(sidebar, /onTogglePinned=\{\(\) => setPinnedRecentIds/);
+  assert.match(sidebar, /PINNED_RECENT_STORAGE_KEY/);
   assert.match(sidebar, /relativeTime=\{formatRelativeTime\(session\.modified, locale\)\}/);
-  assert.match(sidebar, /updateProject\(project\.path, \{ pinned: !project\.pinned \}\)/);
   assert.match(sidebar, /sidebar\.unpin/);
   assert.match(sidebar, /sidebar\.pin/);
   assert.match(sidebar, /data-selected=\{selected\}/);
@@ -219,6 +221,7 @@ test("desktop sidebar rows keep more air without changing type", () => {
   assert.doesNotMatch(styles, /\.codex-sidebar-recent \{[^}]*border-bottom:/);
   assert.match(styles, /\.codex-sidebar-recent > \[role="list"\] \{[\s\S]*?padding: 6px 8px 4px;/);
   assert.match(styles, /\.codex-recent-project-heading \{[\s\S]*?min-height: 28px;/);
+  assert.match(styles, /\.codex-recent-session-row > \.codex-sidebar-icon-button \{[\s\S]*?width: 24px;/);
   assert.match(styles, /\.codex-sidebar-project-list \{[\s\S]*?padding: 4px 8px 10px;/);
   assert.match(styles, /\.codex-recent-session-row \{ height: 38px; \}/);
   assert.match(styles, /\.codex-project \{ margin-bottom: 4px; \}/);

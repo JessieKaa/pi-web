@@ -1213,13 +1213,13 @@ pre, code {
   white-space: nowrap;
   font-weight: var(--weight-semibold);
 }
-.codex-recent-project-heading > .codex-sidebar-icon-button {
+.codex-recent-project-group .codex-recent-session-row { margin-left: 8px; }
+.codex-recent-session-row > .codex-sidebar-icon-button {
   width: 24px;
   height: 24px;
   color: var(--text-dim);
 }
-.codex-recent-project-heading > .codex-sidebar-icon-button:hover { color: var(--text); }
-.codex-recent-project-group .codex-recent-session-row { margin-left: 8px; }
+.codex-recent-session-row > .codex-sidebar-icon-button:hover { color: var(--text); }
 .codex-recent-session-title { font-weight: 520; }
 .codex-recent-session-time { flex-shrink: 0; color: var(--text-dim); font-size: var(--text-meta); }
 .codex-sidebar-skeleton {

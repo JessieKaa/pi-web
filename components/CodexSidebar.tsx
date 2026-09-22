@@ -63,6 +63,7 @@ const PROJECT_DISCLOSURE_INITIALIZED_KEY = "pi-web:project-disclosure-initialize
 const UNREAD_STORAGE_KEY = "pi-web:unread-session-ids";
 const RECENT_OPEN_STORAGE_KEY = "pi-web:recent-open";
 const PROJECTS_OPEN_STORAGE_KEY = "pi-web:projects-open";
+const PINNED_RECENT_STORAGE_KEY = "pi-web:pinned-recent-session-ids";
 
 function readStringSet(key: string): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -192,6 +193,7 @@ export function CodexSidebar({
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
   const [unreadIds, setUnreadIds] = useState<Set<string>>(() => readStringSet(UNREAD_STORAGE_KEY));
   const [archivedIds, setArchivedIds] = useState<Set<string>>(() => readArchivedSessionIds());
+  const [pinnedRecentIds, setPinnedRecentIds] = useState<Set<string>>(() => readStringSet(PINNED_RECENT_STORAGE_KEY));
   const [menuProject, setMenuProject] = useState<{ path: string; left: number; top: number } | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -273,6 +275,7 @@ export function CodexSidebar({
   useEffect(() => { void loadData(false); }, [loadData, refreshKey]);
   useEffect(() => { writeStringSet(COLLAPSED_STORAGE_KEY, collapsed); }, [collapsed]);
   useEffect(() => { writeStringSet(UNREAD_STORAGE_KEY, unreadIds); }, [unreadIds]);
+  useEffect(() => { writeStringSet(PINNED_RECENT_STORAGE_KEY, pinnedRecentIds); }, [pinnedRecentIds]);
   useEffect(() => {
     try {
       localStorage.setItem(RECENT_OPEN_STORAGE_KEY, recentOpen ? "1" : "0");
@@ -354,8 +357,8 @@ export function CodexSidebar({
     [projects],
   );
   const recentProjectGroups = useMemo(
-    () => filterRecentProjectGroups(buildRecentProjectGroups(visibleSessions, activeProjects, archivedIds), filterQuery),
-    [activeProjects, archivedIds, filterQuery, visibleSessions],
+    () => filterRecentProjectGroups(buildRecentProjectGroups(visibleSessions, activeProjects, archivedIds, pinnedRecentIds), filterQuery),
+    [activeProjects, archivedIds, filterQuery, pinnedRecentIds, visibleSessions],
   );
   const quickSearch = quickQuery.trim().toLowerCase();
   const quickProjectResults = useMemo(() => activeProjects
@@ -790,12 +793,6 @@ export function CodexSidebar({
               <div className="codex-recent-project-heading" title={project.path}>
                 <FolderIcon />
                 <span className="codex-recent-project-name">{projectLabel}</span>
-                <IconButton
-                  label={project.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
-                  onClick={() => updateProject(project.path, { pinned: !project.pinned })}
-                >
-                  <Pin size={13} strokeWidth={1.8} fill={project.pinned ? "currentColor" : "none"} aria-hidden="true" />
-                </IconButton>
               </div>
               {projectSessions.map((session) => (
                 <SessionRow
@@ -805,11 +802,22 @@ export function CodexSidebar({
                   running={activeRootIds.has(session.id)}
                   unread={unreadIds.has(session.id)}
                   variant="recent"
+                  pinned={pinnedRecentIds.has(session.id)}
+                  onTogglePinned={() => setPinnedRecentIds((current) => {
+                    const next = new Set(current);
+                    next.has(session.id) ? next.delete(session.id) : next.add(session.id);
+                    return next;
+                  })}
                   relativeTime={formatRelativeTime(session.modified, locale)}
                   onSelect={() => selectSession(session)}
                   onChanged={() => void loadData(false)}
-                  onDeleted={() => { onSessionDeleted?.(session.id); void loadData(false); }}
+                  onDeleted={() => {
+                    setPinnedRecentIds((current) => { const next = new Set(current); next.delete(session.id); return next; });
+                    onSessionDeleted?.(session.id);
+                    void loadData(false);
+                  }}
                   onArchive={() => {
+                    setPinnedRecentIds((current) => { const next = new Set(current); next.delete(session.id); return next; });
                     setArchivedIds((current) => new Set(current).add(session.id));
                     setUnreadIds((current) => {
                       if (!current.has(session.id)) return current;
@@ -1115,13 +1123,14 @@ export function CodexSidebar({
   );
 }
 
-function SessionRow({ session, selected, running, unread, variant = "nested", projectLabel, relativeTime, onSelect, onChanged, onDeleted, onArchive }: {
+function SessionRow({ session, selected, running, unread, variant = "nested", pinned, onTogglePinned, relativeTime, onSelect, onChanged, onDeleted, onArchive }: {
   session: SessionInfo;
   selected: boolean;
   running: boolean;
   unread: boolean;
   variant?: "nested" | "recent";
-  projectLabel?: string;
+  pinned?: boolean;
+  onTogglePinned?: () => void;
   relativeTime?: string;
   onSelect: () => void;
   onChanged: () => void;
@@ -1138,7 +1147,7 @@ function SessionRow({ session, selected, running, unread, variant = "nested", pr
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const title = sessionTitle(session);
   const isRecent = variant === "recent";
-  const rowTitle = isRecent && projectLabel ? `${projectLabel} · ${title}` : title;
+  const rowTitle = title;
 
   useEffect(() => {
     if (!menuPos) return;
@@ -1251,6 +1260,11 @@ function SessionRow({ session, selected, running, unread, variant = "nested", pr
         )}
             <span className={`codex-session-title${isRecent ? " codex-recent-session-title" : ""}`}>{title}</span>
       </button>
+      )}
+      {isRecent && onTogglePinned && (
+        <IconButton label={pinned ? t("sidebar.unpin") : t("sidebar.pin")} onClick={onTogglePinned}>
+          <Pin size={13} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} aria-hidden="true" />
+        </IconButton>
       )}
       {isRecent && relativeTime ? <span className="codex-recent-session-time">{relativeTime}</span> : null}
       {!session.transient && (

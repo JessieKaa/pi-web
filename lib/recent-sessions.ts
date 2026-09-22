@@ -4,7 +4,6 @@ import type { SessionInfo } from "./types";
 export interface RecentProject {
   path: string;
   name?: string;
-  pinned?: boolean;
   archived: boolean;
   removed: boolean;
 }
@@ -19,6 +18,7 @@ export interface RecentProjectGroup {
   projectLabel: string;
   sessions: SessionInfo[];
   latestModified: string;
+  hasPinnedSession: boolean;
 }
 
 export function buildRecentSessions(
@@ -62,26 +62,25 @@ export function filterRecentSessions(
 
 /**
  * The Recent section is capped by session recency, then those sessions are
- * organized beneath their project folder. A pinned project is promoted above
- * other recent folders and retains its latest session even after it falls out
- * of the ordinary recency window.
+ * organized beneath their project folder. A pinned session is promoted above
+ * other sessions and remains present after it falls out of the ordinary
+ * recency window.
  */
 export function buildRecentProjectGroups(
   sessions: readonly SessionInfo[],
   projects: readonly RecentProject[],
   archivedIds: ReadonlySet<string>,
+  pinnedSessionIds: ReadonlySet<string> = new Set(),
   limit = 8,
 ): RecentProjectGroup[] {
   const projectsByPath = new Map(projects.map((project) => [project.path, project]));
   const allRows = buildRecentSessions(sessions, projects, archivedIds, Number.MAX_SAFE_INTEGER);
   const visibleRows = new Map(allRows.slice(0, limit).map((row) => [row.session.id, row]));
 
-  // Pinning is useful only if the folder remains visible after newer activity
-  // elsewhere pushes it out of the normal recent-session window.
-  for (const project of projects) {
-    if (!project.pinned) continue;
-    const latestRow = allRows.find((row) => (row.session.projectRoot ?? row.session.cwd) === project.path);
-    if (latestRow) visibleRows.set(latestRow.session.id, latestRow);
+  // Pinning is useful only if the conversation remains visible after newer
+  // activity elsewhere pushes it out of the normal recent-session window.
+  for (const row of allRows) {
+    if (pinnedSessionIds.has(row.session.id)) visibleRows.set(row.session.id, row);
   }
 
   const grouped = new Map<string, RecentProjectGroup>();
@@ -99,13 +98,22 @@ export function buildRecentProjectGroups(
       projectLabel: row.projectLabel,
       sessions: [row.session],
       latestModified: row.session.modified,
+      hasPinnedSession: pinnedSessionIds.has(row.session.id),
     });
   }
 
-  return [...grouped.values()].sort((a, b) =>
-    Number(b.project.pinned === true) - Number(a.project.pinned === true)
-    || b.latestModified.localeCompare(a.latestModified),
-  );
+  for (const group of grouped.values()) {
+    group.sessions.sort((a, b) => {
+      return Number(pinnedSessionIds.has(b.id)) - Number(pinnedSessionIds.has(a.id))
+        || b.modified.localeCompare(a.modified);
+    });
+    group.hasPinnedSession = group.sessions.some((session) => pinnedSessionIds.has(session.id));
+  }
+
+  return [...grouped.values()].sort((a, b) => {
+    return Number(b.hasPinnedSession) - Number(a.hasPinnedSession)
+      || b.latestModified.localeCompare(a.latestModified);
+  });
 }
 
 export function filterRecentProjectGroups(
