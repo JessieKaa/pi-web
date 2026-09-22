@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { MessageView, ThinkingBlock, getToolCallInputText, replaceUserMessageText } = await jiti.import("./MessageView.tsx");
+const { MessageView, ThinkingBlock, getToolCallInputText, haveSameWrittenFiles, replaceUserMessageText } = await jiti.import("./MessageView.tsx");
 const { I18nProvider } = await jiti.import("../hooks/useI18n.tsx");
 
 const source = await import("node:fs").then((fs) => fs.readFileSync(new URL("./MessageView.tsx", import.meta.url), "utf8"));
@@ -30,6 +30,14 @@ Review the supplied files.
 </skill>
 
 src/main.ts`;
+
+test("compares derived written files by path so MessageView updates when tool results resolve", () => {
+  assert.equal(haveSameWrittenFiles(undefined, undefined), true);
+  assert.equal(haveSameWrittenFiles([{ filePath: "/tmp/old.ts" }], [{ filePath: "/tmp/old.ts" }]), true);
+  assert.equal(haveSameWrittenFiles([], [{ filePath: "/tmp/new.ts" }]), false);
+  assert.equal(haveSameWrittenFiles([{ filePath: "/tmp/old.ts" }], [{ filePath: "/tmp/new.ts" }]), false);
+  assert.match(source, /haveSameWrittenFiles\(prev\.writtenFiles, next\.writtenFiles\)/);
+});
 
 test("renders user prompts as right-aligned compact bubbles without role labels", () => {
   const html = renderMessage({ role: "user", content: "build a game to play", timestamp: Date.now() });

@@ -230,6 +230,15 @@ function haveSameRelevantToolResults(
   return true;
 }
 
+export function haveSameWrittenFiles(
+  previous: WrittenFile[] | undefined,
+  next: WrittenFile[] | undefined,
+): boolean {
+  if (previous === next) return true;
+  if (!previous || !next || previous.length !== next.length) return false;
+  return previous.every((file, index) => file.filePath === next[index]?.filePath);
+}
+
 export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, defaultDetailsExpanded = false, writtenFiles, tokenSpeedEnabled = true }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} />;
@@ -268,6 +277,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.prevTimestamp === next.prevTimestamp
     && prev.sessionId === next.sessionId
     && prev.defaultDetailsExpanded === next.defaultDetailsExpanded
+    && haveSameWrittenFiles(prev.writtenFiles, next.writtenFiles)
     && prev.tokenSpeedEnabled === next.tokenSpeedEnabled;
 });
 

@@ -8,19 +8,21 @@ const historySource = source.slice(
   source.indexOf("export function ChatWindow"),
 );
 
-test("memoizes the historical transcript without the streaming message object", () => {
+test("memoizes the historical transcript and delegates grouping to the pure render plan", () => {
   assert.match(source, /const HistoryTranscript = memo\(function HistoryTranscript\(/);
   assert.match(source, /<HistoryTranscript[\s\S]*?isStreaming=\{streamState\.isStreaming\}[\s\S]*?hasStreamingContent=\{hasStreamingContent\}/);
   assert.doesNotMatch(historySource, /streamingMessage/);
-  assert.match(historySource, /const isLiveTail = isStreaming && hasStreamingContent && endIdx === messages\.length && userIdx === lastAnchorIdx/);
+  assert.match(historySource, /const plan = useMemo\(\(\) => buildChatRenderPlan\(/);
+  assert.match(historySource, /const rendered = plan\.items\.map\(\(item\) => renderItem\(item\)\)/);
+  assert.doesNotMatch(historySource, /splitThinkingBlocks|isConversationSegmentAnchor|findFinalAssistantIndex/);
 });
 
-test("keeps transcript loading, message-ref ordinals, and branch controls in the memoized child", () => {
-  assert.match(historySource, /const visibleRefIndexByMessage = new Map<number, number>\(\)/);
-  assert.match(historySource, /showSentinel && \(/);
+test("keeps transcript loading, source ref ordinals, and branch controls in the memoized renderer", () => {
   assert.match(historySource, /ref=\{sentinelRef\}/);
+  assert.match(historySource, /item\.refIndex/);
   assert.match(historySource, /onFork=\{isSubagentMode \|\| sessionBusy \|\| isNew/);
   assert.match(historySource, /onNavigate=\{isSubagentMode \|\| sessionBusy \? undefined : handleNavigate\}/);
+  assert.match(historySource, /extractTurnWrittenFiles\(item\.turnContent, toolResultsMap, messageCwd\)/);
 });
 
 test("only grows or trims message refs when the historical visible count changes", () => {
