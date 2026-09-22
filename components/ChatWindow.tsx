@@ -214,6 +214,16 @@ function isGroupAnchor(message: AgentMessage): boolean {
   return message.role === "custom" && (message as CustomMessage).customType === "compaction";
 }
 
+// Extensions can resume work after the model already sent a final answer.
+// Their notification is not part of that completed turn: it starts a new
+// process segment so its following thinking/tool messages can fold normally.
+function isConversationSegmentAnchor(messages: AgentMessage[], index: number): boolean {
+  const message = messages[index];
+  if (!message) return false;
+  return isGroupAnchor(message)
+    || (message.role === "custom" && index > 0 && hasFinalAssistantAnswer(messages[index - 1]!));
+}
+
 function withAssistantBlocks(
   message: AssistantMessage,
   content: AssistantContentBlock[],
@@ -1032,7 +1042,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               // the last user message and anchor the still-streaming segment.
               let lastAnchorIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {
-                if (isGroupAnchor(messages[i])) { lastAnchorIdx = i; break; }
+                if (isConversationSegmentAnchor(messages, i)) { lastAnchorIdx = i; break; }
               }
 
               const visibleRefIndexByMessage = new Map<number, number>();
@@ -1103,8 +1113,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
               const rendered: ReactNode[] = [];
               for (let idx = 0; idx < messages.length;) {
-                const msg = messages[idx];
-                if (!isGroupAnchor(msg)) {
+                if (!isConversationSegmentAnchor(messages, idx)) {
                   rendered.push(renderMessage(idx));
                   idx += 1;
                   continue;
@@ -1112,7 +1121,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
                 const userIdx = idx;
                 let endIdx = userIdx + 1;
-                while (endIdx < messages.length && !isGroupAnchor(messages[endIdx])) endIdx += 1;
+                while (endIdx < messages.length && !isConversationSegmentAnchor(messages, endIdx)) endIdx += 1;
 
                 const finalAssistantIdx = findFinalAssistantIndex(messages, userIdx, endIdx);
 
@@ -1124,7 +1133,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                   continue;
                 }
 
-                const isLiveTail = (sessionBusy || streamState.isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
+                // Persisted tool-use messages are already complete, even when
+                // the session wrapper still reports an active run. Only leave
+                // a genuinely streaming assistant response ungrouped.
+                const isLiveTail = streamState.isStreaming && hasStreamingContent && endIdx === messages.length && userIdx === lastAnchorIdx;
                 if (isLiveTail) {
                   for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
                     rendered.push(renderMessage(renderIdx));

@@ -19,6 +19,14 @@ test("keeps thinking groups bounded by process and non-assistant messages", () =
   assert.match(source, /flushThinking\(\);\s*flushProcess\(\);/);
 });
 
-test("leaves the live tail ungrouped for streaming updates", () => {
+test("starts a new group when an extension continues after a final answer", () => {
+  assert.match(source, /function isConversationSegmentAnchor\(messages: AgentMessage\[\], index: number\)/);
+  assert.match(source, /message\.role === "custom" && index > 0 && hasFinalAssistantAnswer\(messages\[index - 1\]!\)/);
+  assert.match(source, /while \(endIdx < messages\.length && !isConversationSegmentAnchor\(messages, endIdx\)\)/);
+});
+
+test("leaves only a genuinely streaming live tail ungrouped", () => {
+  assert.match(source, /const isLiveTail = streamState\.isStreaming && hasStreamingContent && endIdx === messages\.length && userIdx === lastAnchorIdx/);
+  assert.doesNotMatch(source, /const isLiveTail = \(sessionBusy \|\| streamState\.isStreaming\)/);
   assert.match(source, /if \(isLiveTail\) \{\s*for \(let renderIdx = userIdx; renderIdx < endIdx; renderIdx\+\+\) \{\s*rendered\.push\(renderMessage\(renderIdx\)\);/);
 });
