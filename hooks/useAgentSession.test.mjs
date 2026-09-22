@@ -40,7 +40,7 @@ test("keeps the session event stream open through the idle grace window", () => 
   assert.match(source, /const EVENT_STREAM_IDLE_GRACE_MS = 30_000/);
   assert.match(graceSource, /setTimeout\(\(\) => void checkServerIdle\(\), EVENT_STREAM_IDLE_GRACE_MS\)/);
   assert.match(graceSource, /fetch\(`\/api\/agent\/\$\{encodeURIComponent\(sid\)\}`\)/);
-  assert.match(graceSource, /closeEvents\(\)/);
+  assert.match(graceSource, /maintainEventsConnected\(sid, "passive"\)/);
   assert.match(finishSource, /scheduleEventStreamClose\(sid\)/);
   assert.doesNotMatch(finishSource, /closeEvents\(\)/);
   assert.doesNotMatch(agentEndSource, /closeEvents\(\)/);
@@ -146,7 +146,7 @@ test("a rejected submission preserves a different run reported by the server", (
   assert.match(reconcileSource, /sessionIdRef\.current !== sid/);
   assert.match(reconcileSource, /if \(busy\) \{[\s\S]*?sdkAgentActiveRef\.current = Boolean\(state\.isStreaming\)/);
   assert.match(reconcileSource, /rpcPromptPendingRef\.current = Boolean\(state\.isPromptRunning\)/);
-  assert.match(reconcileSource, /if \(busy\) \{[\s\S]*?maintainEventsConnected\(sid\)/);
+  assert.match(reconcileSource, /if \(busy\) \{[\s\S]*?maintainEventsConnected\(sid, "active"\)/);
   assert.match(reconcileSource, /if \(!agentRunningRef\.current\) return;[\s\S]*?finishPromptWithoutStream/);
   assert.ok(
     reconcileSource.indexOf("state?.contextUsage") < reconcileSource.indexOf("if (busy)"),
@@ -349,16 +349,37 @@ test("delegates event stream readiness and hides an empty agent phase", () => {
   );
 
   assert.match(source, /new AgentEventConnection\(\{/);
-  assert.match(source, /shouldMaintain: \(sid\)[\s\S]*?sessionIdRef\.current === sid/);
-  assert.match(ensureSource, /eventConnectionRef\.current!\.ensureConnected\(sid, \{ force, startsRuntime \}\)/);
-  assert.match(ensureSource, /eventConnectionRef\.current!\.maintain\(sid\)/);
-  assert.match(source, /await ensureEventsConnected\(sid, true, true\)/);
-  assert.match(source, /await ensureEventsConnected\(session\.id, true, true\)/);
-  assert.match(source, /startsRuntime \? "\?start=1" : ""/);
+  assert.match(source, /shouldMaintain: \(sid, mode\)[\s\S]*?sessionIdRef\.current === sid/);
+  assert.match(ensureSource, /eventConnectionRef\.current!\.ensureConnected\(sid, \{ mode, force \}\)/);
+  assert.match(ensureSource, /ensureEventsConnected\(sid, "active", force\)/);
+  assert.match(ensureSource, /eventConnectionRef\.current!\.maintain\(sid, mode\)/);
+  assert.match(source, /await ensureActiveRuntime\(sid, true\)/);
+  assert.match(source, /await ensureActiveRuntime\(session\.id, true\)/);
+  assert.match(source, /events\?mode=\$\{mode\}/);
   assert.match(chatWindowSource, /const hasStreamingContent = Boolean\(streamState\.streamingMessage\?\.content\.length\)/);
   assert.match(chatWindowSource, /streamState\.isStreaming && hasStreamingContent && streamState\.streamingMessage/);
   assert.match(chatWindowSource, /agentRunning && !hasStreamingContent && agentPhase/);
   assert.match(chatWindowSource, /return null;/);
+});
+
+test("extension UI responses do not activate a vanished runtime", () => {
+  const extensionResponse = source.slice(
+    source.indexOf("const respondToExtensionUi"),
+    source.indexOf("const runExtensionCommand"),
+  );
+  assert.match(extensionResponse, /type: "extension_ui_response"/);
+  assert.match(extensionResponse, /type: "extension_ui_input"/);
+  assert.doesNotMatch(extensionResponse, /ensureActiveRuntime/);
+});
+
+test("runtime commands upgrade the passive observer before posting", () => {
+  const commands = source.slice(
+    source.indexOf("const loadSlashCommands"),
+    source.indexOf("const scrollUserMsgToTop"),
+  );
+  assert.match(commands, /await ensureActiveRuntime\(sid\);[\s\S]*?type: "get_commands"/);
+  assert.match(commands, /await ensureActiveRuntime\(sid\);[\s\S]*?type: "compact"/);
+  assert.match(commands, /await ensureActiveRuntime\(sid\);[\s\S]*?type: "set_tools"/);
 });
 
 test("uses one absolute agent-readiness deadline instead of a five-second transport deadline", () => {
@@ -366,18 +387,18 @@ test("uses one absolute agent-readiness deadline instead of a five-second transp
   assert.doesNotMatch(source, /EVENT_STREAM_OPEN_TIMEOUT_MS/);
 });
 
-test("keeps historical session browsing passive and only leases known live runs", () => {
+test("keeps historical session browsing passive and upgrades known live runs", () => {
   assert.match(source, /sessionRunning\?: boolean/);
   const maintenanceSource = source.slice(
-    source.indexOf("  // Observe a selected session only while"),
+    source.indexOf("  // Normal history gets a passive"),
     source.indexOf("  const respondToExtensionUi"),
   );
-  assert.match(maintenanceSource, /const needsEvents = Boolean\(sessionRunning\)/);
-  assert.match(maintenanceSource, /if \(!needsEvents\) \{\s*closeEvents\(\);\s*return;/);
-  assert.match(maintenanceSource, /maintainEventsConnected\(sid\)/);
+  assert.match(maintenanceSource, /eventStreamDemandRef\.current \? "active" : "passive"/);
+  assert.match(maintenanceSource, /maintainEventsConnected\(sid, eventStreamDemandRef\.current \? "active" : "passive"\)/);
   assert.match(maintenanceSource, /getSessionLeaseHeartbeatMs\(\)/);
-  assert.match(source, /eventStreamDemandRef\.current/);
-  assert.match(source, /\?start=1/);
+  assert.match(source, /mode === "passive" \|\| eventStreamDemandRef\.current/);
+  assert.match(source, /ensureActiveRuntime/);
+  assert.match(source, /maintainEventsConnected\(sid, "passive"\)/);
   assert.doesNotMatch(source, /void connectEvents\(/);
   assert.match(chatWindowSource, /sessionRunning\?: boolean/);
   assert.match(chatWindowSource, /session, sessionRunning, newSessionCwd/);

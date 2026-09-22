@@ -7,6 +7,8 @@ export interface AgentEventSourceLike {
   close(): void;
 }
 
+export type AgentEventMode = "passive" | "active";
+
 export type AgentEventConnectionStatus = "ready_timeout" | "startup_error" | "closed";
 
 export class AgentEventConnectionError extends Error {
@@ -29,16 +31,15 @@ type Attempt = {
 
 type Connection = {
   sessionId: string;
-  /** Whether this transport was explicitly allowed to cold-start a runtime. */
-  startsRuntime: boolean;
+  mode: AgentEventMode;
   source: AgentEventSourceLike;
   attempt: Attempt;
 };
 
 export interface AgentEventConnectionOptions {
-  createSource(sessionId: string, options: { startsRuntime: boolean }): AgentEventSourceLike;
+  createSource(sessionId: string, mode: AgentEventMode): AgentEventSourceLike;
   onEvent(event: AgentEventLike): void;
-  shouldMaintain(sessionId: string): boolean;
+  shouldMaintain(sessionId: string, mode: AgentEventMode): boolean;
   readinessTimeoutMs: number;
   reconnectDelayMs: number;
   staleAfterMs?: number;
@@ -48,8 +49,7 @@ export interface AgentEventConnectionOptions {
 
 export interface EnsureConnectedOptions {
   force?: boolean;
-  /** Use only immediately before an action that intentionally starts a runtime. */
-  startsRuntime?: boolean;
+  mode?: AgentEventMode;
 }
 
 const EVENT_SOURCE_OPEN = 1;
@@ -58,7 +58,7 @@ const DEFAULT_STALE_AFTER_MS = 45_000;
 /** Owns the EventSource, agent-readiness handshake, and passive reconnect. */
 export class AgentEventConnection {
   private current: Connection | null = null;
-  private retry: { sessionId: string; timer: ReturnType<typeof setTimeout> } | null = null;
+  private retry: { sessionId: string; mode: AgentEventMode; timer: ReturnType<typeof setTimeout> } | null = null;
   private retryGeneration = 0;
   private lastEventAt = 0;
 
@@ -79,14 +79,14 @@ export class AgentEventConnection {
     if (this.current) this.discard(this.current, new AgentEventConnectionError("closed"));
   }
 
-  maintain(sessionId: string): void {
-    if (!this.options.shouldMaintain(sessionId)) return;
+  maintain(sessionId: string, mode: AgentEventMode = "passive"): void {
+    if (!this.options.shouldMaintain(sessionId, mode)) return;
     const retryGeneration = this.retryGeneration;
-    void this.ensureConnected(sessionId).catch((error) => {
+    void this.ensureConnected(sessionId, { mode }).catch((error) => {
       if (retryGeneration !== this.retryGeneration) return;
       if (error instanceof AgentEventConnectionError) {
         if (error.status === "startup_error") this.stopRetrying();
-        else this.scheduleRetry(sessionId);
+        else this.scheduleRetry(sessionId, mode);
       } else {
         this.options.onUnexpectedError?.(error);
       }
@@ -95,15 +95,13 @@ export class AgentEventConnection {
 
   async ensureConnected(sessionId: string, options: EnsureConnectedOptions = {}): Promise<void> {
     let force = Boolean(options.force);
-    const startsRuntime = Boolean(options.startsRuntime);
+    const mode = options.mode ?? "passive";
     while (true) {
       let connection = this.current;
-      // An observe-only source must be upgraded before an explicit action can
-      // rely on it to cold-start the runtime. The inverse is safe: a source
-      // that was allowed to start remains a valid observer once it is ready.
-      const needsRuntimeStartUpgrade = startsRuntime && !connection?.startsRuntime;
-      if (!connection || connection.sessionId !== sessionId || needsRuntimeStartUpgrade) {
-        connection = this.open(sessionId, startsRuntime);
+      // The mode is part of transport identity: passive observers never hold a
+      // lease, while active transports may cold-start and renew one.
+      if (!connection || connection.sessionId !== sessionId || connection.mode !== mode) {
+        connection = this.open(sessionId, mode);
         force = false;
       } else if (
         connection.attempt.ready
@@ -130,13 +128,18 @@ export class AgentEventConnection {
     }
   }
 
-  private open(sessionId: string, startsRuntime = false): Connection {
+  private open(sessionId: string, mode: AgentEventMode): Connection {
+    // An upgrade/downgrade invalidates a retry from the old mode. Otherwise a
+    // late passive retry can replace a pending active transport (or vice versa).
+    // Do not bump the generation for the first connection: its own maintain()
+    // call still needs to schedule a retry if this initial attempt fails.
+    if (this.current || this.retry) this.stopRetrying();
     if (this.current) this.discard(this.current, new AgentEventConnectionError("closed"));
     this.lastEventAt = this.now();
 
     let source: AgentEventSourceLike;
     try {
-      source = this.options.createSource(sessionId, { startsRuntime });
+      source = this.options.createSource(sessionId, mode);
     } catch (error) {
       throw new AgentEventConnectionError(
         "closed",
@@ -170,7 +173,7 @@ export class AgentEventConnection {
         reject(error);
       },
     };
-    const connection: Connection = { sessionId, startsRuntime, source, attempt };
+    const connection: Connection = { sessionId, mode, source, attempt };
     this.current = connection;
 
     source.onmessage = (message) => {
@@ -208,7 +211,7 @@ export class AgentEventConnection {
     if (this.current !== connection) return;
     this.discard(connection, error);
     if (error.status === "startup_error") this.stopRetrying();
-    else this.scheduleRetry(connection.sessionId);
+    else this.scheduleRetry(connection.sessionId, connection.mode);
   }
 
   private discard(connection: Connection, error: AgentEventConnectionError): void {
@@ -217,17 +220,17 @@ export class AgentEventConnection {
     if (this.current === connection) this.current = null;
   }
 
-  private scheduleRetry(sessionId: string): void {
-    if (!this.options.shouldMaintain(sessionId)) return;
-    if (this.retry?.sessionId === sessionId) return;
+  private scheduleRetry(sessionId: string, mode: AgentEventMode): void {
+    if (!this.options.shouldMaintain(sessionId, mode)) return;
+    if (this.retry?.sessionId === sessionId && this.retry.mode === mode) return;
     this.clearRetry();
 
     const timer = setTimeout(() => {
       if (this.retry?.timer !== timer) return;
       this.retry = null;
-      this.maintain(sessionId);
+      this.maintain(sessionId, mode);
     }, this.options.reconnectDelayMs);
-    this.retry = { sessionId, timer };
+    this.retry = { sessionId, mode, timer };
   }
 
   private stopRetrying(): void {

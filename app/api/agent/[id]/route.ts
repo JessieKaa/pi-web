@@ -26,6 +26,13 @@ export async function POST(
       return Response.json({ success: true, data: result });
     }
 
+    // A dialog/input can only target an extension request owned by an existing
+    // runtime. Recreating a dead session just to answer a stale UI request
+    // would replay extension startup as an accidental side effect.
+    if (body.type === "extension_ui_response" || body.type === "extension_ui_input") {
+      return Response.json({ error: "Agent runtime is no longer available" }, { status: 409 });
+    }
+
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return Response.json({

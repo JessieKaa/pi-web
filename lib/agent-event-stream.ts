@@ -13,6 +13,13 @@ export interface AgentEventStreamSession {
   hasActiveSessionLease?(now?: number): boolean;
 }
 
+export type AgentEventStreamMode = "passive" | "active";
+
+export interface AgentEventStreamOptions {
+  /** Active streams own the runtime lease; passive observers never renew it. */
+  mode?: AgentEventStreamMode;
+}
+
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
 function errorMessage(error: unknown): string {
@@ -26,8 +33,12 @@ function errorMessage(error: unknown): string {
 export function createAgentEventStream(
   req: Request,
   sessionId: string,
-  sessionPromise: Promise<AgentEventStreamSession>,
+  sessionPromise: Promise<AgentEventStreamSession | null>,
+  modeOrOptions: AgentEventStreamMode | AgentEventStreamOptions = "active",
 ): ReadableStream<Uint8Array> {
+  const mode = typeof modeOrOptions === "string"
+    ? modeOrOptions
+    : modeOrOptions.mode ?? "active";
   let cancelStream: (closeController: boolean) => void = () => {};
 
   return new ReadableStream<Uint8Array>({
@@ -78,6 +89,16 @@ export function createAgentEventStream(
           const session = await sessionPromise;
           if (closed) return;
 
+          if (session === null) {
+            encode({
+              type: "connected",
+              sessionId,
+              runtime: "absent",
+              isStreaming: false,
+            });
+            return;
+          }
+
           const bufferedEvents: AgentEventLike[] = [];
           let snapshotPublished = false;
           const handleEvent = (event: AgentEventLike) => {
@@ -96,11 +117,14 @@ export function createAgentEventStream(
           unsubscribe = stopListening;
 
           const snapshot = session.streamingMessage;
-          session.setSessionLease?.();
-          leasedSession = session;
+          if (mode === "active") {
+            session.setSessionLease?.();
+            leasedSession = session;
+          }
           encode({
             type: "connected",
             sessionId,
+            runtime: "live",
             isStreaming: session.isStreaming,
           });
           for (const event of bufferedEvents) forwardEvent(event, snapshot);
