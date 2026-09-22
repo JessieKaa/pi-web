@@ -45,10 +45,18 @@ const ChatMinimap = lazy(() => import("./ChatMinimap").then((module) => ({
 
 // Keyboard keys that scroll the transcript. Only real scroll intent should
 // close the sentinel machine's absorbing window, so arbitrary key presses are
-// ignored.
-const SENTINEL_SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+// ignored. Space is deliberately excluded: it belongs to the composer.
+const SENTINEL_SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 function isSentinelScrollKey(key: string): boolean {
   return SENTINEL_SCROLL_KEYS.has(key);
+}
+
+// A scroll key typed into the composer (or any editable control) is not a
+// transcript scroll.
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
 }
 
 interface Props {
@@ -465,7 +473,7 @@ const HistoryTranscript = memo(function HistoryTranscript({
           className="block w-full py-3 text-center text-xs text-text-muted hover:text-text disabled:cursor-wait disabled:opacity-60"
           disabled={loadingOlderHistory && !hasMore}
           aria-busy={loadingOlderHistory && !hasMore}
-          onClick={() => onSentinelEvent({ type: "click" })}
+          onClick={() => onSentinelEvent({ type: "click", planHasMore: hasMore })}
         >
           {t("chat.loadEarlier", { count: hasMore ? startIndex : SESSION_MESSAGE_WINDOW })}
         </button>
@@ -636,7 +644,13 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       return;
     }
     void loadOlderHistory().then((added) => {
-      if (added > 0) setRequestedVisibleCount((prev) => growVisibleCount(prev, visibleCountRef.current, added));
+      if (added > 0) {
+        setRequestedVisibleCount((prev) => growVisibleCount(prev, visibleCountRef.current, added));
+      } else {
+        // No rows arrived: drop the pre-capture so a later unrelated window
+        // change cannot restore to a stale scroll distance.
+        prevScrollDistanceRef.current = null;
+      }
     });
   }, [loadOlderHistory, scrollContainerRef, setRequestedVisibleCount]);
 
@@ -654,7 +668,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   // not re-created when `visibleCount`/`messages.length` change: a re-created
   // observer fires a synthetic initial callback that used to re-arm the
   // sentinel and cascade a local expand into an API page. The state machine
-  // absorbs any residual self-inflicted notification until a real user scroll.
+  // absorbs any residual self-inflicted notification until a real user scroll
+  // cycle (intent + position change) completes.
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!sentinelElement || !container) return;
@@ -668,20 +683,33 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     );
     observer.observe(sentinelElement);
 
-    const handleUserScroll = () => runSentinelEvent({ type: "user-scroll" });
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (isSentinelScrollKey(event.key)) runSentinelEvent({ type: "user-scroll" });
+    // Intent comes from gestures that actually scroll the transcript. A
+    // transcript click is a pointerdown whose target is a child, so it is not
+    // treated as scroll intent (a scrollbar drag targets the container).
+    const handleScrollIntent = () => runSentinelEvent({ type: "user-scroll-intent" });
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target === container) runSentinelEvent({ type: "user-scroll-intent" });
     };
-    container.addEventListener("wheel", handleUserScroll, { passive: true });
-    container.addEventListener("touchmove", handleUserScroll, { passive: true });
-    container.addEventListener("pointerdown", handleUserScroll, { passive: true });
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isSentinelScrollKey(event.key) && !isEditableTarget(event.target)) {
+        runSentinelEvent({ type: "user-scroll-intent" });
+      }
+    };
+    // The position transition. Programmatic restores fire this too, but the
+    // machine ignores them because no intent was recorded.
+    const handleScroll = () => runSentinelEvent({ type: "user-scroll" });
+    container.addEventListener("wheel", handleScrollIntent, { passive: true });
+    container.addEventListener("touchmove", handleScrollIntent, { passive: true });
+    container.addEventListener("pointerdown", handlePointerDown, { passive: true });
+    container.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("keydown", handleKeyDown);
 
     return () => {
       observer.disconnect();
-      container.removeEventListener("wheel", handleUserScroll);
-      container.removeEventListener("touchmove", handleUserScroll);
-      container.removeEventListener("pointerdown", handleUserScroll);
+      container.removeEventListener("wheel", handleScrollIntent);
+      container.removeEventListener("touchmove", handleScrollIntent);
+      container.removeEventListener("pointerdown", handlePointerDown);
+      container.removeEventListener("scroll", handleScroll);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [sentinelElement, runSentinelEvent, scrollContainerRef]);

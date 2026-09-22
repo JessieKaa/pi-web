@@ -68,7 +68,9 @@ test("does not cascade a first-screen sentinel into local plus API pagination", 
 });
 
 test("keeps an explicit sentinel click immediate and prevents a follow-up auto page", () => {
-  assert.match(historySource, /onClick=\{\(\) => onSentinelEvent\(\{ type: "click" \}\)\}/);
+  // The click carries the render plan's own hasMore; the observer keeps the
+  // raw source-message mixed count instead.
+  assert.match(historySource, /onClick=\{\(\) => onSentinelEvent\(\{ type: "click", planHasMore: hasMore \}\)\}/);
   assert.match(source, /setRequestedVisibleCount\(\(prev\) => growVisibleCount\(prev, visibleCountRef\.current\)\)/);
   assert.match(source, /void loadOlderHistory\(\)\.then\(\(added\) => \{/);
   assert.match(source, /if \(action === "none"\) return;/);
@@ -133,4 +135,20 @@ test("captures the scroll distance before every prepend trigger", () => {
   const loadIndex = source.indexOf("void loadOlderHistory().then", captureIndex);
   assert.ok(expandIndex > captureIndex, "capture must precede the local expand");
   assert.ok(loadIndex > captureIndex, "capture must precede the API page");
+});
+
+test("closes the absorbing window only after a complete user scroll cycle", () => {
+  // Intent comes from real scroll gestures; a transcript pointerdown targets a
+  // child so it is not scroll intent (a scrollbar drag targets the container).
+  assert.match(source, /runSentinelEvent\(\{ type: "user-scroll-intent" \}\)/);
+  assert.match(source, /if \(event\.target === container\) runSentinelEvent\(\{ type: "user-scroll-intent" \}\)/);
+  assert.match(source, /if \(isSentinelScrollKey\(event\.key\) && !isEditableTarget\(event\.target\)\)/);
+  // The position change is a separate event so a programmatic restore cannot
+  // close the window on its own.
+  assert.match(source, /container\.addEventListener\("scroll", handleScroll/);
+  assert.match(source, /runSentinelEvent\(\{ type: "user-scroll" \}\)/);
+  // Space is a composer key, not a transcript scroll.
+  assert.match(source, /const SENTINEL_SCROLL_KEYS = new Set\(\["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"\]\)/);
+  // added=0 must drop the stale pre-capture.
+  assert.match(source, /\/\/ No rows arrived: drop the pre-capture[\s\S]*?prevScrollDistanceRef\.current = null;/);
 });

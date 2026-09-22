@@ -94,9 +94,14 @@ export function decideSentinelPage({
  * anchor. The browser then reports the sentinel's new intersection through the
  * IntersectionObserver, and those reports are indistinguishable from a real
  * user leave/re-enter. `phase: "absorbing"` marks the window in which those
- * self-inflicted notifications must never start a second network request:
- * every observer event is consumed until a genuine user scroll hands control
- * back (`user-scroll` -> `phase: "idle"`).
+ * self-inflicted notifications must never start a second network request.
+ *
+ * The window only closes on a complete *user-driven scroll cycle*: a real
+ * user scroll gesture (`user-scroll-intent`) followed by an actual
+ * scroll-position change (`user-scroll`) while no older-history request is in
+ * flight. A programmatic scroll restore emits only `user-scroll` without the
+ * intent flag, and a transcript click is never a scroll, so neither can reopen
+ * the cascade.
  *
  * `intersecting` remembers the last report so that a user scroll while the
  * sentinel is already out of view re-arms it. `armed` is only set on an
@@ -109,28 +114,47 @@ export type SentinelPagingState = {
   phase: SentinelPagingPhase;
   armed: boolean;
   intersecting: boolean;
+  /**
+   * A real user scroll gesture was seen while absorbing but the matching
+   * scroll-position change has not arrived yet.
+   */
+  pendingUserScroll: boolean;
 };
 
 export type SentinelPagingContext = {
+  /**
+   * Raw source-message `hasMore`. The observer intentionally keeps this
+   * mixed-count contract; the explicit click carries its own render-plan count
+   * instead (see `SentinelPagingEvent`).
+   */
   renderedHasMore: boolean;
   historyHasMore: boolean;
   loadingOlderHistory: boolean;
 };
 
 export type SentinelPagingEvent =
-  | { type: "reset" }
+  | { type: "user-scroll-intent" }
   | { type: "user-scroll" }
   | { type: "observer"; intersecting: boolean }
-  | { type: "click" };
+  | { type: "click"; planHasMore: boolean };
 
 export function createSentinelPagingState(): SentinelPagingState {
-  return { phase: "idle", armed: false, intersecting: true };
+  return { phase: "idle", armed: false, intersecting: true, pendingUserScroll: false };
 }
 
-function decideSentinelPageAction(context: SentinelPagingContext): SentinelPageAction {
-  if (context.renderedHasMore) return "expand";
+function decideSentinelPageAction(renderedHasMore: boolean, context: SentinelPagingContext): SentinelPageAction {
+  if (renderedHasMore) return "expand";
   if (context.historyHasMore && !context.loadingOlderHistory) return "load-older";
   return "none";
+}
+
+function armOnIdle(state: SentinelPagingState): SentinelPagingState {
+  return {
+    ...state,
+    phase: "idle",
+    armed: state.intersecting ? state.armed : true,
+    pendingUserScroll: false,
+  };
 }
 
 export function reduceSentinelPaging(
@@ -139,30 +163,39 @@ export function reduceSentinelPaging(
   context: SentinelPagingContext,
 ): { action: SentinelPageAction; state: SentinelPagingState } {
   switch (event.type) {
-    case "reset":
-      return { action: "none", state: createSentinelPagingState() };
+    case "user-scroll-intent": {
+      // Only a real gesture is recorded, and never while an older-history
+      // request is in flight: that request's own prepend churn must stay
+      // absorbed even if the user keeps scrolling.
+      if (state.phase !== "absorbing" || context.loadingOlderHistory) {
+        return { action: "none", state };
+      }
+      return { action: "none", state: { ...state, pendingUserScroll: true } };
+    }
 
     case "user-scroll": {
-      // A real user gesture ends the absorbing window. If the sentinel is
-      // already off-screen the user is scrolling back toward it, so arm now;
-      // the following observer enter is then a genuine user re-entry.
-      return {
-        action: "none",
-        state: {
-          phase: "idle",
-          armed: state.intersecting ? state.armed : true,
-          intersecting: state.intersecting,
-        },
-      };
+      // A scroll-position change only closes the absorbing window when it
+      // follows a real gesture. A programmatic restore has no intent.
+      if (state.phase === "absorbing") {
+        if (context.loadingOlderHistory || !state.pendingUserScroll) {
+          return { action: "none", state };
+        }
+      }
+      return { action: "none", state: armOnIdle(state) };
     }
 
     case "click": {
-      const action = decideSentinelPageAction(context);
+      // The explicit click pages against the render plan's own `hasMore`, not
+      // the raw source-message count the observer uses.
+      const action = decideSentinelPageAction(event.planHasMore, context);
       if (action === "none") return { action, state };
       // An explicit click always pages immediately and opens an absorbing
       // window so the observer cannot add a second automatic page for the very
       // same operation.
-      return { action, state: { phase: "absorbing", armed: false, intersecting: true } };
+      return {
+        action,
+        state: { phase: "absorbing", armed: false, intersecting: true, pendingUserScroll: false },
+      };
     }
 
     case "observer": {
@@ -180,9 +213,12 @@ export function reduceSentinelPaging(
       if (state.phase === "absorbing" || !state.armed) {
         return { action: "none", state: { ...state, intersecting } };
       }
-      const action = decideSentinelPageAction(context);
+      const action = decideSentinelPageAction(context.renderedHasMore, context);
       if (action === "none") return { action, state: { ...state, intersecting } };
-      return { action, state: { phase: "absorbing", armed: false, intersecting } };
+      return {
+        action,
+        state: { phase: "absorbing", armed: false, intersecting, pendingUserScroll: false },
+      };
     }
   }
 }
