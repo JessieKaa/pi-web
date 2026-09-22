@@ -49,7 +49,7 @@ test("keeps the composer symmetric now that the minimap sits outside the column"
   assert.match(chatInputSource, /padding: compact \? 0 : "0 16px 8px",/);
   assert.doesNotMatch(chatWindowSource, /minimapOffset/);
   assert.match(chatWindowSource, /const ChatMinimap = lazy\(\(\) => import\("\.\/ChatMinimap"\)\.then\(/);
-  assert.match(chatWindowSource, /<ChatMinimap[\s\S]*\{contextGutter\}/);
+  assert.match(chatWindowSource, /\{contextGutter\}[\s\S]*<ChatMinimap/);
 });
 
 test("prevents iOS focus zoom from widening the layout", () => {

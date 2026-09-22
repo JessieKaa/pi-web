@@ -1348,20 +1348,20 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       )}
         <ExtensionStatusBar statuses={visibleStatuses} widgets={footerWidgets} gutterDuplicate={gutterWidgets.length > 0} />
         </div>
-        {isMobile ? null : (
-          <Suspense fallback={null}>
-          <ChatMinimap
-            messages={messages}
-            streamingMessage={streamState.streamingMessage}
-            scrollContainer={scrollContainerRef}
-            messageRefs={messageRefs}
-            onRevealHistory={revealHistoryForMinimap}
-          />
-          </Suspense>
-        )}
         </>
         </div>
         {contextGutter}
+        {isMobile ? null : (
+          <Suspense fallback={null}>
+            <ChatMinimap
+              messages={messages}
+              streamingMessage={streamState.streamingMessage}
+              scrollContainer={scrollContainerRef}
+              messageRefs={messageRefs}
+              onRevealHistory={revealHistoryForMinimap}
+            />
+          </Suspense>
+        )}
       </div>
       )}
     </div>

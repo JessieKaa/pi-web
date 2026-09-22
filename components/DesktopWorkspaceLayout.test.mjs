@@ -29,3 +29,12 @@ test("context card is absent until the center column has enough real width", () 
   assert.match(css, /\.desktop-workspace-context \{[\s\S]*?display: none/);
   assert.match(css, /@media \(min-width: 1280px\)[\s\S]*?@container chat-center \(min-width: 760px\)[\s\S]*?display: flex/);
 });
+
+test("keeps the minimap after the context gutter so it has workspace height and remains clickable", () => {
+  const main = chat.indexOf('className="chat-workspace-main"');
+  const mainClose = chat.indexOf('\n        </div>\n        {contextGutter}', main);
+  const gutter = chat.indexOf("{contextGutter}", mainClose);
+  const minimap = chat.indexOf("<ChatMinimap", gutter);
+
+  assert.ok(main >= 0 && mainClose > main && gutter > mainClose && minimap > gutter);
+});
