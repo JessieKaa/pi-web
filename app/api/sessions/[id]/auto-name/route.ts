@@ -108,9 +108,16 @@ export function createAutoNamePost(deps: AutoNameRouteDeps) {
   };
 }
 
-export const POST = createAutoNamePost({
+const defaultAutoNamePost = createAutoNamePost({
   resolveSessionPath,
   getRpcSession,
   startRpcSession: (id, filePath, cwd) => startRpcSession(id, filePath, cwd),
   invalidateSessionListCache,
 });
+
+export async function POST(
+  req: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  return defaultAutoNamePost(req, context);
+}
