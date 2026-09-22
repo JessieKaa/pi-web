@@ -76,7 +76,14 @@ export function updateProjectPreference(
   return withProjectRegistryLock(registryPath, () => {
     const projects = readProjectPreferences(registryPath);
     const index = projects.findIndex((project) => project.path === path);
-    if (index < 0) throw new Error("Project not found");
+    // Projects are derived from sessions client-side, so the first update for a
+    // session-only project (archive/remove) arrives before any registry row exists.
+    if (index < 0) {
+      return writeProjectPreferences(
+        [...projects, normalizeProjectPreferences([{ ...update, path, order: projects.length }])[0]],
+        registryPath,
+      );
+    }
     const next = projects.map((project, projectIndex) => projectIndex === index
       ? { ...project, ...update, path: project.path }
       : project);

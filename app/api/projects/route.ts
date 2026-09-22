@@ -55,7 +55,6 @@ export async function PATCH(request: Request) {
     };
     return Response.json({ projects: await updateProjectPreference(body.path, update) });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return Response.json({ error: message }, { status: message === "Project not found" ? 404 : 400 });
+    return Response.json({ error: String(error) }, { status: 400 });
   }
 }
