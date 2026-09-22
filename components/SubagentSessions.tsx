@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ChevronRight, CircleStop, Network, Send } from "lucide-react";
+import { ArrowLeft, ChevronRight, CircleStop, Network, Send } from "lucide-react";
 import type { SubagentLifecycleState, SubagentTreeNode } from "@/lib/api-types";
 import type { ExtensionWidgetItem } from "@/lib/types";
 import { stripAnsi } from "@/lib/ansi";
@@ -560,11 +560,15 @@ export interface BreadcrumbItem {
 export function SessionBreadcrumb({
   items,
   onSelect,
+  onReturnToRoot,
 }: {
   items: BreadcrumbItem[];
   onSelect(id: string): void;
+  /** A durable primary-session action that remains available while the tree reloads. */
+  onReturnToRoot?: () => void;
 }) {
-  if (items.length === 0) return null;
+  const { t } = useI18n();
+  if (items.length === 0 && !onReturnToRoot) return null;
   return (
     <nav
       aria-label="Subagent breadcrumb"
@@ -580,33 +584,59 @@ export function SessionBreadcrumb({
         color: "var(--text-muted)",
       }}
     >
-      {items.map((item, index) => (
-        <span key={item.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}>
-          {index > 0 ? <ChevronRight size={11} strokeWidth={1.6} aria-hidden="true" style={{ flexShrink: 0 }} /> : null}
-          {index === items.length - 1 ? (
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", maxWidth: 320 }}>{item.label}</span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onSelect(item.id)}
-              style={{
-                maxWidth: 260,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                border: "none",
-                background: "transparent",
-                color: "var(--accent)",
-                cursor: "pointer",
-                fontSize: "var(--text-ui)",
-                padding: "2px 2px",
-              }}
-            >
-              {item.label}
-            </button>
-          )}
-        </span>
-      ))}
+      {onReturnToRoot ? (
+        <button
+          type="button"
+          data-subagent-return-to-root="true"
+          onClick={onReturnToRoot}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            border: "none",
+            background: "transparent",
+            color: "var(--accent)",
+            cursor: "pointer",
+            fontSize: "var(--text-ui)",
+            padding: "2px 2px",
+          }}
+        >
+          <ArrowLeft size={13} strokeWidth={1.8} aria-hidden="true" />
+          {t("subagents.returnToMain")}
+        </button>
+      ) : null}
+      {items.map((item, index) => {
+        // The explicit return action above replaces the root crumb. It stays
+        // available even when tree polling temporarily has no child nodes.
+        if (index === 0 && onReturnToRoot) return null;
+        return (
+          <span key={item.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+            {index > 0 ? <ChevronRight size={11} strokeWidth={1.6} aria-hidden="true" style={{ flexShrink: 0 }} /> : null}
+            {index === items.length - 1 ? (
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", maxWidth: 320 }}>{item.label}</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onSelect(item.id)}
+                style={{
+                  maxWidth: 260,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--accent)",
+                  cursor: "pointer",
+                  fontSize: "var(--text-ui)",
+                  padding: "2px 2px",
+                }}
+              >
+                {item.label}
+              </button>
+            )}
+          </span>
+        );
+      })}
     </nav>
   );
 }

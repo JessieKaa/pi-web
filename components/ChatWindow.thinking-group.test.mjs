@@ -33,8 +33,8 @@ test("starts a new group when an extension continues after a final answer", () =
   assert.match(planSource, /while \(endIndex < messages\.length && !isConversationSegmentAnchor\(messages, endIndex\)\)/);
 });
 
-test("leaves only a genuinely streaming live tail ungrouped", () => {
-  assert.match(planSource, /const isLiveTail = isStreaming\s*&& hasStreamingContent\s*&& endIndex === messages\.length\s*&& anchorIndex === lastAnchorIndex/);
-  assert.doesNotMatch(planSource, /const isLiveTail = \(sessionBusy \|\| streamState\.isStreaming\)/);
-  assert.match(planSource, /if \(isLiveTail\) \{\s*for \(let renderIndex = anchorIndex; renderIndex < endIndex; renderIndex\+\+\) rendered\.push\(message\(renderIndex\)\);/);
+test("keeps persisted process grouping independent of separate live-stream state", () => {
+  assert.doesNotMatch(planSource, /\bisLiveTail\b/);
+  assert.doesNotMatch(planSource, /\bhasStreamingContent\b/);
+  assert.doesNotMatch(planSource, /\blastAnchorIndex\b/);
 });

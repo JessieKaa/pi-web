@@ -772,6 +772,7 @@ export const enLocale: LocalePlugin = {
     "i18n.extensionInputNeeded": "An extension is waiting for your input.",
     "subagents.title": "Subagents",
     "subagents.open": "Subagents ({count})",
+    "subagents.returnToMain": "Return to main agent",
     "subagents.empty": "No subagent sessions yet.",
     "subagents.readOnly": "Live controls are unavailable for this session.",
     "subagents.steer": "Steer",

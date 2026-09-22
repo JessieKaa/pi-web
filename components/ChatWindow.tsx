@@ -597,9 +597,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     messages,
     entryIds,
     isStreaming: streamState.isStreaming,
-    hasStreamingContent,
     sessionId: transcriptSessionId,
-  }), [entryIds, hasStreamingContent, messages, streamState.isStreaming, transcriptSessionId]);
+  }), [entryIds, messages, streamState.isStreaming, transcriptSessionId]);
   // A long tool/process turn appends many plan descriptors after the last user
   // message. Keep the window at least large enough to render that message so
   // `lastUserMsgRef` (and the prompt anchor) never points at an unmounted node.

@@ -772,6 +772,7 @@ export const zhCNLocale: LocalePlugin = {
     "i18n.extensionInputNeeded": "扩展正在等待你的输入。",
     "subagents.title": "子代理",
     "subagents.open": "子代理（{count}）",
+    "subagents.returnToMain": "返回主代理",
     "subagents.empty": "暂无子代理会话。",
     "subagents.readOnly": "此会话的实时控制不可用。",
     "subagents.steer": "引导",

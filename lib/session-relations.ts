@@ -28,7 +28,10 @@ export function attachSessionRelations(sessions: SessionInfo[]): SessionInfo[] {
     return {
       ...session,
       sessionRole: "subagent",
-      ...(rootSessionId && byId.has(rootSessionId) ? { rootSessionId } : {}),
+      // Keep the resolved parent identity even while the primary session is
+      // temporarily absent from this inventory. The client uses it to keep a
+      // child preview attached to its primary instead of re-rooting on itself.
+      ...(rootSessionId ? { rootSessionId } : {}),
       subagentAgent: match[1],
       subagentRunId: match[2],
       ...(encodedIndex !== undefined && encodedIndex > 0 ? { subagentIndex: encodedIndex - 1 } : {}),

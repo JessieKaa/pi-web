@@ -220,6 +220,26 @@ test("breadcrumb renders root and every ancestor as buttons with the current as 
   assert.equal(render(React.createElement(SessionBreadcrumb, { items: [], onSelect: noop })), "");
 });
 
+test("breadcrumb exposes a durable return-to-main action while the tree reloads", () => {
+  const items = [
+    { id: "root", label: "Main task" },
+    { id: "child", label: "task child" },
+  ];
+  const html = render(React.createElement(SessionBreadcrumb, {
+    items,
+    onSelect: noop,
+    onReturnToRoot: noop,
+  }));
+  assert.match(html, /data-subagent-return-to-root="true"/);
+  assert.match(html, /Return to main agent/);
+  assert.doesNotMatch(html, />Main task</);
+  assert.match(render(React.createElement(SessionBreadcrumb, {
+    items: [],
+    onSelect: noop,
+    onReturnToRoot: noop,
+  })), /data-subagent-return-to-root="true"/);
+});
+
 test("running composer exposes steer submit and soft interrupt without a stop", () => {
   const html = render(React.createElement(SubagentComposer, {
     node: node("child", "running"),

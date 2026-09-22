@@ -10,10 +10,12 @@ function node(sessionId, task, children = [], parentSessionId = "") {
   return { sessionId, parentSessionId, runId: "r", index: 1, agent: "a", task, state: "running", canSteer: false, canInterrupt: false, children };
 }
 
-test("root identity uses rootSessionId and falls back to the selected session", async () => {
+test("child previews retain the primary root across transient session-list gaps", async () => {
   const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-  assert.match(source, /const selectedRootId = selectedSession\s*\?\s*selectedSession\.rootSessionId \?\? selectedSession\.id\s*:\s*null/);
+  assert.match(source, /const \[rootSessionInfo, setRootSessionInfo\] = useState<SessionInfo \| null>\(null\)/);
   assert.match(source, /const childSelected = selectedSession\?\.sessionRole === "subagent"/);
+  assert.match(source, /const hasResolvedSelectedSession = Boolean\(selectedSession\?\.path\)/);
+  assert.match(source, /selectedSession\.rootSessionId \?\? rootSessionInfo\?\.id \?\? selectedSession\.id/);
   assert.match(source, /useSubagentTree\(\{\s*rootId: selectedRootId,\s*treeOpen: activeTopPanel === "subagents" \|\| desktopSubagentPollingEnabled,\s*childSelected,\s*\}\)/);
 });
 
@@ -41,19 +43,19 @@ test("breadcrumb builds the root-to-selected chain from the tree", () => {
   assert.deepEqual(buildBreadcrumbItems(tree, "missing", "root-session", "Main task"), []);
 });
 
-test("selecting a subagent or breadcrumb closes the top panel on desktop and mobile", async () => {
+test("subagent selection preserves a direct route back to the primary session", async () => {
   const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-  // handleSubagentSelect closes the panel unconditionally, not only on mobile.
-  assert.match(source, /const handleSubagentSelect = useCallback\(\(node: SubagentTreeNode\) => \{\s*if \(!node\.sessionId\) return;\s*void resolveSessionById\(node\.sessionId\)\.then\(\(session\) => \{\s*if \(session\) handleSelectSession\(session\);/);
-  assert.doesNotMatch(source, /if \(isMobile\) setActiveTopPanel\(null\)/);
-  // handleBreadcrumbSelect also closes the panel after selecting a session.
-  assert.match(source, /const handleBreadcrumbSelect = useCallback\(\(sessionId: string\) => \{\s*void resolveSessionById\(sessionId\)\.then\(\(session\) => \{\s*if \(session\) handleSelectSession\(session\);/);
-  assert.match(source, /closeTopPanel\(\);\s*\}, \[handleSelectSession, resolveSessionById, closeTopPanel\]\)/);
+  assert.match(source, /const root = rootSessionInfo \?\? \(childSelected \? null : selectedSession\)/);
+  assert.match(source, /const rootSessionId = session\.rootSessionId \?\? root\?\.id \?\? selectedRootId/);
+  assert.match(source, /const handleReturnToMainAgent = useCallback/);
+  assert.match(source, /onReturnToRoot=\{handleReturnToMainAgent\}/);
+  // Selecting a child still closes the top-panel picker on every viewport.
+  assert.match(source, /handleSelectSession\(rootSessionId \? \{ \.\.\.session, rootSessionId \} : session\);\s*\}\);\s*closeTopPanel\(\);/);
 });
 
 test("the breadcrumb call site seeds the chain with the real root session id", async () => {
   const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-  assert.match(source, /items=\{buildBreadcrumbItems\(\s*subagents\.data\.nodes,\s*selectedSession\.id,\s*selectedRootId \?\? "",/);
+  assert.match(source, /items=\{subagents\.data \? buildBreadcrumbItems\(\s*subagents\.data\.nodes,\s*selectedSession\.id,\s*selectedRootId \?\? "",/);
 });
 
 test("live markers derive from active descendants, not RPC availability", async () => {
@@ -81,9 +83,10 @@ test("wide desktop keeps subagent polling eligible without a right context gutte
   assert.doesNotMatch(source, /\bDesktopConversationContext\b/);
 });
 
-test("the subagent popover anchors to its trigger and clamps to the viewport", async () => {
+test("the subagent popover anchors to its trigger, keeps the desktop sidebar, and clamps to the viewport", async () => {
   const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
   assert.match(source, /subagentsAnchorRef\.current/);
+  assert.match(source, /if \(isMobile\) setSidebarOpen\(false\);/);
   assert.match(source, /Math\.min\(360, window\.innerWidth - 24\)/);
   assert.match(source, /Math\.max\(8, Math\.min\(rect\.left, Math\.max\(8, window\.innerWidth - width - 8\)\)\)/);
   assert.match(source, /setActiveTopPanel\(\(current\) => current === "subagents" \? null : "subagents"\)/);

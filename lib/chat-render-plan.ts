@@ -65,7 +65,6 @@ export type BuildChatRenderPlanOptions = {
   messages: AgentMessage[];
   entryIds: string[];
   isStreaming: boolean;
-  hasStreamingContent: boolean;
   sessionId?: string;
 };
 
@@ -117,15 +116,14 @@ export function buildChatRenderPlan({
   messages,
   entryIds,
   isStreaming,
-  hasStreamingContent,
   sessionId,
 }: BuildChatRenderPlanOptions): ChatRenderPlan {
   let lastUserMessageIndex = -1;
-  let lastAnchorIndex = -1;
   for (let index = messages.length - 1; index >= 0; index--) {
-    if (lastUserMessageIndex === -1 && messages[index]?.role === "user") lastUserMessageIndex = index;
-    if (lastAnchorIndex === -1 && isConversationSegmentAnchor(messages, index)) lastAnchorIndex = index;
-    if (lastUserMessageIndex !== -1 && lastAnchorIndex !== -1) break;
+    if (messages[index]?.role === "user") {
+      lastUserMessageIndex = index;
+      break;
+    }
   }
 
   // This is the ordinal consumed by ChatMinimap, not an item index in this
@@ -163,18 +161,6 @@ export function buildChatRenderPlan({
 
     const finalAssistantIndex = findFinalAssistantIndex(messages, anchorIndex, endIndex);
     if (finalAssistantIndex === -1) {
-      for (let renderIndex = anchorIndex; renderIndex < endIndex; renderIndex++) rendered.push(message(renderIndex));
-      index = endIndex;
-      continue;
-    }
-
-    // Persisted tool-use entries are complete even while the session wrapper
-    // reports activity. Only a genuine final streaming tail stays unfolded.
-    const isLiveTail = isStreaming
-      && hasStreamingContent
-      && endIndex === messages.length
-      && anchorIndex === lastAnchorIndex;
-    if (isLiveTail) {
       for (let renderIndex = anchorIndex; renderIndex < endIndex; renderIndex++) rendered.push(message(renderIndex));
       index = endIndex;
       continue;

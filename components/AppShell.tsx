@@ -770,10 +770,19 @@ export function AppShell() {
   }, [activeCwd, invalidateWorkspaceRestore, navigate, isMobile, selectedSession]);
 
   // ---- Subagent tree: root identity, polling, selection --------------------
-  const selectedRootId = selectedSession
-    ? selectedSession.rootSessionId ?? selectedSession.id
-    : null;
+  // Keep the primary session while its child transcript is selected. Session
+  // inventories can briefly omit a parent, so a child cannot be allowed to
+  // become its own tree root during that refresh.
+  const [rootSessionInfo, setRootSessionInfo] = useState<SessionInfo | null>(null);
   const childSelected = selectedSession?.sessionRole === "subagent";
+  // A URL-selected session begins as an ID-only placeholder. Wait for the
+  // sidebar inventory to classify it before requesting a root-scoped tree.
+  const hasResolvedSelectedSession = Boolean(selectedSession?.path);
+  const selectedRootId = selectedSession && hasResolvedSelectedSession
+    ? childSelected
+      ? selectedSession.rootSessionId ?? rootSessionInfo?.id ?? selectedSession.id
+      : selectedSession.id
+    : null;
   // Keep the wide-desktop toolbar count current so a newly started first child
   // appears before its subagent popover is opened.
   const desktopSubagentPollingEnabled = isWideDesktop;
@@ -782,7 +791,6 @@ export function AppShell() {
     treeOpen: activeTopPanel === "subagents" || desktopSubagentPollingEnabled,
     childSelected,
   });
-  const [rootSessionInfo, setRootSessionInfo] = useState<SessionInfo | null>(null);
   useEffect(() => {
     if (!selectedRootId) {
       setRootSessionInfo(null);
@@ -792,6 +800,10 @@ export function AppShell() {
       setRootSessionInfo(selectedSession);
       return;
     }
+    // A selected child can arrive without rootSessionId in a transient list
+    // response. Keep the root captured before navigation until the lookup has
+    // a chance to refresh it.
+    if (rootSessionInfo?.id === selectedRootId) return;
     setRootSessionInfo(null);
     void fetch("/api/sessions", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() as Promise<{ sessions: SessionInfo[] }> : null))
@@ -800,7 +812,7 @@ export function AppShell() {
         if (root) setRootSessionInfo(root);
       })
       .catch(() => {});
-  }, [selectedRootId, selectedSession]);
+  }, [rootSessionInfo, selectedRootId, selectedSession]);
 
   const resolveSessionById = useCallback(async (sessionId: string): Promise<SessionInfo | null> => {
     const response = await fetch("/api/sessions", { cache: "no-store" });
@@ -811,11 +823,31 @@ export function AppShell() {
 
   const handleSubagentSelect = useCallback((node: SubagentTreeNode) => {
     if (!node.sessionId) return;
+    const root = rootSessionInfo ?? (childSelected ? null : selectedSession);
+    if (root) setRootSessionInfo(root);
     void resolveSessionById(node.sessionId).then((session) => {
-      if (session) handleSelectSession(session);
+      if (!session) return;
+      // Preserve the root captured from the active tree when a transient
+      // session-list response has not attached it to the child yet.
+      const rootSessionId = session.rootSessionId ?? root?.id ?? selectedRootId;
+      handleSelectSession(rootSessionId ? { ...session, rootSessionId } : session);
     });
     closeTopPanel();
-  }, [handleSelectSession, resolveSessionById, closeTopPanel]);
+  }, [childSelected, closeTopPanel, handleSelectSession, resolveSessionById, rootSessionInfo, selectedRootId, selectedSession]);
+
+  const handleReturnToMainAgent = useCallback(() => {
+    if (rootSessionInfo) {
+      handleSelectSession(rootSessionInfo);
+      return;
+    }
+    const rootId = selectedRootId !== selectedSession?.id
+      ? selectedRootId
+      : selectedSession?.parentSessionId;
+    if (!rootId) return;
+    void resolveSessionById(rootId).then((session) => {
+      if (session) handleSelectSession(session);
+    });
+  }, [handleSelectSession, resolveSessionById, rootSessionInfo, selectedRootId, selectedSession]);
 
   const handleBreadcrumbSelect = useCallback((sessionId: string) => {
     void resolveSessionById(sessionId).then((session) => {
@@ -1338,7 +1370,7 @@ export function AppShell() {
             onClick={(event) => {
               topPanelReturnFocusRef.current = event.currentTarget;
               subagentsAnchorRef.current = event.currentTarget;
-              setSidebarOpen(false);
+              if (isMobile) setSidebarOpen(false);
               setActiveTopPanel((current) => current === "subagents" ? null : "subagents");
             }}
             aria-label={translate("subagents.open", { count: subagentCount })}
@@ -2241,15 +2273,16 @@ export function AppShell() {
         <main id="conversation" className="app-center-column" tabIndex={-1} style={{ flex: 1, overflow: "hidden", position: "relative" }}>
           {showChat ? (
             <>
-              {childSelected && selectedSession && subagents.data ? (
+              {childSelected && selectedSession ? (
                 <SessionBreadcrumb
-                  items={buildBreadcrumbItems(
+                  items={subagents.data ? buildBreadcrumbItems(
                     subagents.data.nodes,
                     selectedSession.id,
                     selectedRootId ?? "",
                     rootSessionInfo?.name ?? rootSessionInfo?.firstMessage ?? selectedRootId ?? translate("i18n.newSession"),
-                  )}
+                  ) : []}
                   onSelect={handleBreadcrumbSelect}
+                  onReturnToRoot={handleReturnToMainAgent}
                 />
               ) : null}
               <ChatWindow

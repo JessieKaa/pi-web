@@ -135,11 +135,12 @@ const ApiSubagentsRoute = ApiSubagentsRouteImport.update({
   path: '/api/subagents',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiTitleGenerationSettingsRoute = ApiTitleGenerationSettingsRouteImport.update({
-  id: '/api/title-generation-settings',
-  path: '/api/title-generation-settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const ApiTitleGenerationSettingsRoute =
+  ApiTitleGenerationSettingsRouteImport.update({
+    id: '/api/title-generation-settings',
+    path: '/api/title-generation-settings',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiUiLocaleRoute = ApiUiLocaleRouteImport.update({
   id: '/api/ui-locale',
   path: '/api/ui-locale',

@@ -10,14 +10,22 @@ const historySource = source.slice(
 
 test("memoizes the historical transcript and delegates grouping to the pure render plan", () => {
   assert.match(source, /const HistoryTranscript = memo\(function HistoryTranscript\(/);
-  // The render plan is built once in ChatWindow (its deps are the message
-  // array and stream tail flags) and passed down so the minimum visible window
-  // can be computed before the transcript renders.
+  // The render plan is built once in ChatWindow from persisted messages and
+  // stream state, then passed down so the minimum visible window can be
+  // computed before the transcript renders.
   assert.match(source, /const plan = useMemo\(\(\) => buildChatRenderPlan\(/);
+  assert.match(source, /isStreaming: streamState\.isStreaming,/);
   assert.match(source, /<HistoryTranscript[\s\S]*?plan=\{plan\}/);
-  assert.match(source, /isStreaming: streamState\.isStreaming,[\s\S]*?hasStreamingContent,/);
+  assert.doesNotMatch(historySource, /hasStreamingContent/);
   assert.doesNotMatch(historySource, /streamingMessage/);
   assert.doesNotMatch(historySource, /buildChatRenderPlan\(/);
+  assert.match(historySource, /const rendered = visibleItems\.map\(\(item\) => renderItem\(item\)\)/);
+  const planSource = source.slice(
+    source.indexOf("const plan = useMemo"),
+    source.indexOf("const minimumVisibleCount"),
+  );
+  assert.doesNotMatch(planSource, /hasStreamingContent/);
+  assert.match(source, /streamState\.isStreaming && hasStreamingContent && streamState\.streamingMessage/);
   assert.doesNotMatch(historySource, /splitThinkingBlocks|isConversationSegmentAnchor|findFinalAssistantIndex/);
 });
 
