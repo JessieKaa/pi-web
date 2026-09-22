@@ -39,6 +39,20 @@ test("renders user prompts as right-aligned compact bubbles without role labels"
   assert.doesNotMatch(html, />USER</);
 });
 
+test("collapses compaction summary content by default", () => {
+  const html = renderMessage({
+    role: "custom",
+    customType: "compaction",
+    content: "## Goal\n\nkeep-this-summary-hidden",
+  });
+
+  assert.match(html, /class="compaction-content-toggle"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /Show details/);
+  assert.doesNotMatch(html, /keep-this-summary-hidden/);
+  assert.match(source, /detailsExpanded && \(/);
+});
+
 test("fork action uses fork copy, not new-session wording", () => {
   assert.match(source, /i18n\.forkSession/);
   assert.match(source, /i18n\.forkSessionTitle/);

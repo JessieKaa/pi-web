@@ -1352,7 +1352,9 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
   const { t } = useI18n();
   const summary = getMessageText(message.content);
   const parsedSummary = useMemo(() => parseCompactionSummary(summary), [summary]);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const time = formatTime(message.timestamp);
+  const hasDetails = Boolean(parsedSummary.body || parsedSummary.readFiles.length || parsedSummary.modifiedFiles.length);
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -1388,12 +1390,35 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
           <div style={{ marginTop: 3, marginBottom: 10, color: "var(--text)", fontSize: "var(--text-chat)", lineHeight: "var(--leading-prose)" }}>
              {t("i18n.compactionDescription")}
           </div>
-          {parsedSummary.body ? (
-            <MarkdownBody className="markdown-compaction-message">{parsedSummary.body}</MarkdownBody>
+          {hasDetails ? (
+            <>
+              <button
+                type="button"
+                className="compaction-content-toggle"
+                aria-expanded={detailsExpanded}
+                onClick={() => setDetailsExpanded((expanded) => !expanded)}
+              >
+                <ChevronDown
+                  size={14}
+                  aria-hidden="true"
+                  style={{ transform: detailsExpanded ? "rotate(0deg)" : "rotate(-90deg)" }}
+                />
+                {detailsExpanded ? t("i18n.hideDetails") : t("i18n.showDetails")}
+              </button>
+              {detailsExpanded && (
+                <div className="compaction-content">
+                  {parsedSummary.body ? (
+                    <MarkdownBody className="markdown-compaction-message">{parsedSummary.body}</MarkdownBody>
+                  ) : (
+                    <span style={{ color: "var(--text-dim)", fontSize: "var(--text-meta)" }}>{t("i18n.noSummary")}</span>
+                  )}
+                  <CompactionFileMetadata readFiles={parsedSummary.readFiles} modifiedFiles={parsedSummary.modifiedFiles} />
+                </div>
+              )}
+            </>
           ) : (
-             <span style={{ color: "var(--text-dim)", fontSize: "var(--text-meta)" }}>{t("i18n.noSummary")}</span>
+            <span style={{ color: "var(--text-dim)", fontSize: "var(--text-meta)" }}>{t("i18n.noSummary")}</span>
           )}
-          <CompactionFileMetadata readFiles={parsedSummary.readFiles} modifiedFiles={parsedSummary.modifiedFiles} />
         </div>
       </div>
     </div>

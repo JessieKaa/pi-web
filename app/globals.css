@@ -1720,6 +1720,26 @@ html.dark .codex-changes-row[data-status="conflict"] { color: var(--error); }
   margin: 4px 0;
 }
 
+.compaction-content-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+.compaction-content-toggle:hover { background: var(--bg-hover); color: var(--text); }
+.compaction-content-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.compaction-content-toggle svg { transition: transform 120ms ease; }
+.compaction-content { padding-top: 6px; }
+
 .markdown-compaction-message {
   line-height: 1.5;
 }
