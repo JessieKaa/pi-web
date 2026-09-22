@@ -2298,7 +2298,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             }
             rows={1}
             style={{
-              flex: 1,
+              // Do not use flex-grow here: in the column shell it resolves
+              // against the one-line minimum and ignores the JS-set height.
+              // Let the textarea's capped content height grow the shell.
+              flex: "0 1 auto",
               minWidth: 0,
               width: "100%",
               background: "none",

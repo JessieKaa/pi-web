@@ -114,6 +114,14 @@ test("shows the workspace hint inside the composer on the new-session home", () 
   );
 });
 
+test("grows the composer with content up to its textarea cap", async () => {
+  const source = await readFile(new URL("./ChatInput.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /Let the textarea's capped content height grow the shell\./);
+  assert.match(source, /flex: "0 1 auto",[\s\S]*?maxHeight: 200,[\s\S]*?overflow: "auto"/);
+  assert.match(source, /Math\.min\(ta\.scrollHeight, 200\)/);
+});
+
 test("lays out attach, access, model, and reasoning like the reference composer", () => {
   assert.equal(composerThinkingBadgeLevel("auto"), null);
   assert.equal(composerThinkingBadgeLevel("high"), "high");
