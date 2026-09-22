@@ -1195,6 +1195,31 @@ pre, code {
   padding: 6px 8px 4px;
   overflow: visible;
 }
+.codex-recent-project-group { padding: 2px 0 5px; }
+.codex-recent-project-heading {
+  min-height: 28px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-meta);
+}
+.codex-recent-project-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-semibold);
+}
+.codex-recent-project-heading > .codex-sidebar-icon-button {
+  width: 24px;
+  height: 24px;
+  color: var(--text-dim);
+}
+.codex-recent-project-heading > .codex-sidebar-icon-button:hover { color: var(--text); }
+.codex-recent-project-group .codex-recent-session-row { margin-left: 8px; }
 .codex-recent-session-title { font-weight: 520; }
 .codex-recent-session-time { flex-shrink: 0; color: var(--text-dim); font-size: var(--text-meta); }
 .codex-sidebar-skeleton {

@@ -137,9 +137,9 @@ test("desktop sidebar exposes new task, projects, and recent sessions", () => {
   assert.match(sidebar, /sidebar\.newTask/);
   assert.match(sidebar, /sidebar\.projects/);
   assert.match(sidebar, /sidebar\.recent/);
-  assert.match(sidebar, /buildRecentSessions\(visibleSessions, activeProjects, archivedIds\)/);
-  assert.match(sidebar, /filterRecentSessions\(buildRecentSessions\(visibleSessions, activeProjects, archivedIds\), filterQuery\)/);
-  assert.match(sidebar, /recentSessions\.map/);
+  assert.match(sidebar, /buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds\)/);
+  assert.match(sidebar, /filterRecentProjectGroups\(buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds\), filterQuery\)/);
+  assert.match(sidebar, /recentProjectGroups\.map/);
 });
 
 test("recent and projects share one navigation scroll surface", () => {
@@ -196,10 +196,15 @@ test("fresh project disclosure keeps only the current project open", () => {
   assert.match(sidebar, /setCollapsed\(new Set\(inactivePaths\)\)/);
 });
 
-test("recent session rows preserve activity, selection, and session management", () => {
+test("recent sessions are grouped by project and preserve activity and session management", () => {
+  assert.match(sidebar, /className="codex-recent-project-group"/);
+  assert.match(sidebar, /className="codex-recent-project-heading"/);
+  assert.match(sidebar, /projectSessions\.map\(\(session\) => \(/);
   assert.match(sidebar, /<SessionRow[\s\S]*?variant="recent"/);
-  assert.match(sidebar, /projectLabel=\{projectLabel\}/);
   assert.match(sidebar, /relativeTime=\{formatRelativeTime\(session\.modified, locale\)\}/);
+  assert.match(sidebar, /updateProject\(project\.path, \{ pinned: !project\.pinned \}\)/);
+  assert.match(sidebar, /sidebar\.unpin/);
+  assert.match(sidebar, /sidebar\.pin/);
   assert.match(sidebar, /data-selected=\{selected\}/);
   assert.match(sidebar, /dispatchSessionRowContextMenu/);
   assert.match(sidebar, /sidebar\.archiveSession/);
@@ -213,6 +218,7 @@ test("desktop sidebar rows keep more air without changing type", () => {
   assert.match(styles, /\.codex-sidebar-section-heading \{[\s\S]*?height: 36px;/);
   assert.doesNotMatch(styles, /\.codex-sidebar-recent \{[^}]*border-bottom:/);
   assert.match(styles, /\.codex-sidebar-recent > \[role="list"\] \{[\s\S]*?padding: 6px 8px 4px;/);
+  assert.match(styles, /\.codex-recent-project-heading \{[\s\S]*?min-height: 28px;/);
   assert.match(styles, /\.codex-sidebar-project-list \{[\s\S]*?padding: 4px 8px 10px;/);
   assert.match(styles, /\.codex-recent-session-row \{ height: 38px; \}/);
   assert.match(styles, /\.codex-project \{ margin-bottom: 4px; \}/);

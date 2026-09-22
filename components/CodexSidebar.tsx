@@ -17,7 +17,7 @@ import { formatRelativeTime } from "@/lib/i18n/format";
 import { readArchivedSessionIds, writeArchivedSessionIds } from "@/lib/archived-sessions";
 import { filterProjectSessions, matchesSidebarQuery, sidebarProjectName, sidebarSessionTitle } from "@/lib/codex-sidebar-search";
 import type { ProjectPreference } from "@/lib/project-registry";
-import { buildRecentSessions, filterRecentSessions } from "@/lib/recent-sessions";
+import { buildRecentProjectGroups, filterRecentProjectGroups } from "@/lib/recent-sessions";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { activeSessionRoots } from "@/lib/session-relations";
 import type { SessionInfo } from "@/lib/types";
@@ -353,8 +353,8 @@ export function CodexSidebar({
     () => projects.filter((project) => !project.removed && !project.archived),
     [projects],
   );
-  const recentSessions = useMemo(
-    () => filterRecentSessions(buildRecentSessions(visibleSessions, activeProjects, archivedIds), filterQuery),
+  const recentProjectGroups = useMemo(
+    () => filterRecentProjectGroups(buildRecentProjectGroups(visibleSessions, activeProjects, archivedIds), filterQuery),
     [activeProjects, archivedIds, filterQuery, visibleSessions],
   );
   const quickSearch = quickQuery.trim().toLowerCase();
@@ -782,32 +782,45 @@ export function CodexSidebar({
               <i /><i /><i />
             </div>
           )}
-          {filterQuery && recentSessions.length === 0 && !loading && (
+          {filterQuery && recentProjectGroups.length === 0 && !loading && (
             <div className="codex-sidebar-empty">{t("sidebar.noMatches")}</div>
           )}
-          {recentSessions.map(({ session, projectLabel }) => (
-            <SessionRow
-              key={session.id}
-              session={session}
-              selected={session.id === selectedSessionId}
-              running={activeRootIds.has(session.id)}
-              unread={unreadIds.has(session.id)}
-              variant="recent"
-              projectLabel={projectLabel}
-              relativeTime={formatRelativeTime(session.modified, locale)}
-              onSelect={() => selectSession(session)}
-              onChanged={() => void loadData(false)}
-              onDeleted={() => { onSessionDeleted?.(session.id); void loadData(false); }}
-              onArchive={() => {
-                setArchivedIds((current) => new Set(current).add(session.id));
-                setUnreadIds((current) => {
-                  if (!current.has(session.id)) return current;
-                  const next = new Set(current);
-                  next.delete(session.id);
-                  return next;
-                });
-              }}
-            />
+          {recentProjectGroups.map(({ project, projectLabel, sessions: projectSessions }) => (
+            <div className="codex-recent-project-group" key={project.path} role="group" aria-label={projectLabel}>
+              <div className="codex-recent-project-heading" title={project.path}>
+                <FolderIcon />
+                <span className="codex-recent-project-name">{projectLabel}</span>
+                <IconButton
+                  label={project.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+                  onClick={() => updateProject(project.path, { pinned: !project.pinned })}
+                >
+                  <Pin size={13} strokeWidth={1.8} fill={project.pinned ? "currentColor" : "none"} aria-hidden="true" />
+                </IconButton>
+              </div>
+              {projectSessions.map((session) => (
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  selected={session.id === selectedSessionId}
+                  running={activeRootIds.has(session.id)}
+                  unread={unreadIds.has(session.id)}
+                  variant="recent"
+                  relativeTime={formatRelativeTime(session.modified, locale)}
+                  onSelect={() => selectSession(session)}
+                  onChanged={() => void loadData(false)}
+                  onDeleted={() => { onSessionDeleted?.(session.id); void loadData(false); }}
+                  onArchive={() => {
+                    setArchivedIds((current) => new Set(current).add(session.id));
+                    setUnreadIds((current) => {
+                      if (!current.has(session.id)) return current;
+                      const next = new Set(current);
+                      next.delete(session.id);
+                      return next;
+                    });
+                  }}
+                />
+              ))}
+            </div>
           ))}
         </div>
         )}
