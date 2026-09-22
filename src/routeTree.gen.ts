@@ -24,6 +24,7 @@ import { Route as ApiRemoteAccessRouteImport } from './routes/api/remote-access'
 import { Route as ApiSessionsRouteImport } from './routes/api/sessions'
 import { Route as ApiSkillsRouteImport } from './routes/api/skills'
 import { Route as ApiSubagentsRouteImport } from './routes/api/subagents'
+import { Route as ApiTitleGenerationSettingsRouteImport } from './routes/api/title-generation-settings'
 import { Route as ApiUiLocaleRouteImport } from './routes/api/ui-locale'
 import { Route as ApiWorktreesRouteImport } from './routes/api/worktrees'
 import { Route as ApiAgentIdRouteImport } from './routes/api/agent/$id'
@@ -132,6 +133,11 @@ const ApiSkillsRoute = ApiSkillsRouteImport.update({
 const ApiSubagentsRoute = ApiSubagentsRouteImport.update({
   id: '/api/subagents',
   path: '/api/subagents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTitleGenerationSettingsRoute = ApiTitleGenerationSettingsRouteImport.update({
+  id: '/api/title-generation-settings',
+  path: '/api/title-generation-settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiUiLocaleRoute = ApiUiLocaleRouteImport.update({
@@ -324,6 +330,7 @@ export interface FileRoutesByFullPath {
   '/api/sessions': typeof ApiSessionsRouteWithChildren
   '/api/skills': typeof ApiSkillsRouteWithChildren
   '/api/subagents': typeof ApiSubagentsRoute
+  '/api/title-generation-settings': typeof ApiTitleGenerationSettingsRoute
   '/api/ui-locale': typeof ApiUiLocaleRoute
   '/api/worktrees': typeof ApiWorktreesRoute
   '/api/agent/$id': typeof ApiAgentIdRouteWithChildren
@@ -375,6 +382,7 @@ export interface FileRoutesByTo {
   '/api/sessions': typeof ApiSessionsRouteWithChildren
   '/api/skills': typeof ApiSkillsRouteWithChildren
   '/api/subagents': typeof ApiSubagentsRoute
+  '/api/title-generation-settings': typeof ApiTitleGenerationSettingsRoute
   '/api/ui-locale': typeof ApiUiLocaleRoute
   '/api/worktrees': typeof ApiWorktreesRoute
   '/api/agent/$id': typeof ApiAgentIdRouteWithChildren
@@ -427,6 +435,7 @@ export interface FileRoutesById {
   '/api/sessions': typeof ApiSessionsRouteWithChildren
   '/api/skills': typeof ApiSkillsRouteWithChildren
   '/api/subagents': typeof ApiSubagentsRoute
+  '/api/title-generation-settings': typeof ApiTitleGenerationSettingsRoute
   '/api/ui-locale': typeof ApiUiLocaleRoute
   '/api/worktrees': typeof ApiWorktreesRoute
   '/api/agent/$id': typeof ApiAgentIdRouteWithChildren
@@ -480,6 +489,7 @@ export interface FileRouteTypes {
     | '/api/sessions'
     | '/api/skills'
     | '/api/subagents'
+    | '/api/title-generation-settings'
     | '/api/ui-locale'
     | '/api/worktrees'
     | '/api/agent/$id'
@@ -531,6 +541,7 @@ export interface FileRouteTypes {
     | '/api/sessions'
     | '/api/skills'
     | '/api/subagents'
+    | '/api/title-generation-settings'
     | '/api/ui-locale'
     | '/api/worktrees'
     | '/api/agent/$id'
@@ -582,6 +593,7 @@ export interface FileRouteTypes {
     | '/api/sessions'
     | '/api/skills'
     | '/api/subagents'
+    | '/api/title-generation-settings'
     | '/api/ui-locale'
     | '/api/worktrees'
     | '/api/agent/$id'
@@ -634,6 +646,7 @@ export interface RootRouteChildren {
   ApiSessionsRoute: typeof ApiSessionsRouteWithChildren
   ApiSkillsRoute: typeof ApiSkillsRouteWithChildren
   ApiSubagentsRoute: typeof ApiSubagentsRoute
+  ApiTitleGenerationSettingsRoute: typeof ApiTitleGenerationSettingsRoute
   ApiUiLocaleRoute: typeof ApiUiLocaleRoute
   ApiWorktreesRoute: typeof ApiWorktreesRoute
   ApiAgentIdRoute: typeof ApiAgentIdRouteWithChildren
@@ -757,6 +770,13 @@ declare module '@tanstack/react-router' {
       path: '/api/subagents'
       fullPath: '/api/subagents'
       preLoaderRoute: typeof ApiSubagentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/title-generation-settings': {
+      id: '/api/title-generation-settings'
+      path: '/api/title-generation-settings'
+      fullPath: '/api/title-generation-settings'
+      preLoaderRoute: typeof ApiTitleGenerationSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/ui-locale': {
@@ -1114,6 +1134,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSessionsRoute: ApiSessionsRouteWithChildren,
   ApiSkillsRoute: ApiSkillsRouteWithChildren,
   ApiSubagentsRoute: ApiSubagentsRoute,
+  ApiTitleGenerationSettingsRoute: ApiTitleGenerationSettingsRoute,
   ApiUiLocaleRoute: ApiUiLocaleRoute,
   ApiWorktreesRoute: ApiWorktreesRoute,
   ApiAgentIdRoute: ApiAgentIdRouteWithChildren,

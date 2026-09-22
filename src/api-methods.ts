@@ -56,6 +56,7 @@ export const API_ROUTE_METHODS: Record<string, readonly string[]> = {
   "/api/skills/search": ["POST"],
   "/api/skills/update": ["POST"],
   "/api/subagents": ["GET", "PUT"],
+  "/api/title-generation-settings": ["GET", "PUT"],
   "/api/ui-locale": ["GET", "PUT"],
   "/api/worktrees": ["DELETE", "GET", "POST"],
 };

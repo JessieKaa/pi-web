@@ -1,5 +1,5 @@
 /**
- * Shared safe route matrix for the 48 TanStack API adapters.
+ * Shared safe route matrix for the 49 TanStack API adapters.
  *
  * Used identically by standalone and installed-package smoke runs. Never
  * mutates user state: write endpoints are probed with invalid bodies
@@ -242,6 +242,12 @@ export async function smokeAllRoutes({ origin, authHeaders = {} }) {
     });
     await probe("GET", "/api/ui-locale", [200]);
     await probe("PUT", "/api/ui-locale", [400], {
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    await probe("GET", "/api/title-generation-settings", [200]);
+    // PUT with an empty body is rejected before any settings.json write.
+    await probe("PUT", "/api/title-generation-settings", [400], {
       headers: { "content-type": "application/json" },
       body: "{}",
     });
