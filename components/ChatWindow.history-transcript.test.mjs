@@ -60,21 +60,18 @@ test("does not cascade a first-screen sentinel into local plus API pagination", 
   // A fresh session starts disarmed and is re-armed only after the sentinel
   // leaves the viewport, so a sentinel that is already visible on the first
   // screen never triggers an immediate automatic page.
-  assert.match(source, /const sentinelArmedRef = useRef\(false\)/);
-  assert.match(source, /setRequestedVisibleCount\(INITIAL_VISIBLE_COUNT\);[\s\S]*?sentinelArmedRef\.current = false;/);
-  assert.match(source, /decideSentinelPage\(\{/);
-  assert.match(source, /sentinelArmed: sentinelArmedRef\.current/);
-  assert.match(source, /if \(action === "none"\) return;/);
+  assert.match(source, /const sentinelStateRef = useRef\(createSentinelPagingState\(\)\)/);
+  assert.match(source, /setRequestedVisibleCount\(INITIAL_VISIBLE_COUNT\);[\s\S]*?sentinelStateRef\.current = createSentinelPagingState\(\);/);
+  assert.match(source, /const \{ action, state \} = reduceSentinelPaging\(/);
+  assert.match(source, /runSentinelEvent\(\{ type: "observer", intersecting: entry\.isIntersecting \}\)/);
+  assert.doesNotMatch(source, /decideSentinelPage\(\{/);
 });
 
 test("keeps an explicit sentinel click immediate and prevents a follow-up auto page", () => {
-  assert.match(historySource, /setVisibleCount\(\(previous\) => growVisibleCount\(previous, visibleCount\)\)/);
-  assert.match(historySource, /void loadOlderHistory\(\)\.then\(\(added\) => \{/);
-  // The click handler disarms the observer for the page it just requested.
-  assert.match(
-    historySource,
-    /sentinelArmedRef\.current = false;[\s\S]*?if \(hasMore\) \{/,
-  );
+  assert.match(historySource, /onClick=\{\(\) => onSentinelEvent\(\{ type: "click" \}\)\}/);
+  assert.match(source, /setRequestedVisibleCount\(\(prev\) => growVisibleCount\(prev, visibleCountRef\.current\)\)/);
+  assert.match(source, /void loadOlderHistory\(\)\.then\(\(added\) => \{/);
+  assert.match(source, /if \(action === "none"\) return;/);
 });
 
 test("keeps transcript loading, source ref ordinals, and branch controls in the memoized renderer", () => {
@@ -126,9 +123,14 @@ test("restores prepended history scroll synchronously before the browser paints"
 });
 
 test("captures the scroll distance before every prepend trigger", () => {
-  const captures = source.match(
-    /prevScrollDistanceRef\.current = captureScrollDistance\(container\.scrollHeight, container\.scrollTop\)/g,
-  ) ?? [];
-  // Both the IntersectionObserver and the explicit sentinel click capture first.
-  assert.ok(captures.length >= 2, `expected at least 2 capture sites, found ${captures.length}`);
+  const captureIndex = source.indexOf(
+    "prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop)",
+  );
+  assert.notEqual(captureIndex, -1, "prepend scroll distance must be captured");
+  // The same capture must run before both branches the state machine can ask
+  // for, so the scroll restore in useLayoutEffect can keep the viewport stable.
+  const expandIndex = source.indexOf('if (action === "expand")', captureIndex);
+  const loadIndex = source.indexOf("void loadOlderHistory().then", captureIndex);
+  assert.ok(expandIndex > captureIndex, "capture must precede the local expand");
+  assert.ok(loadIndex > captureIndex, "capture must precede the API page");
 });

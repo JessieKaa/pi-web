@@ -87,6 +87,106 @@ export function decideSentinelPage({
   return { action: "none", nextSentinelArmed: false };
 }
 
+/**
+ * The sentinel cascade state machine.
+ *
+ * A single page request changes the DOM (prepended descriptors) and the scroll
+ * anchor. The browser then reports the sentinel's new intersection through the
+ * IntersectionObserver, and those reports are indistinguishable from a real
+ * user leave/re-enter. `phase: "absorbing"` marks the window in which those
+ * self-inflicted notifications must never start a second network request:
+ * every observer event is consumed until a genuine user scroll hands control
+ * back (`user-scroll` -> `phase: "idle"`).
+ *
+ * `intersecting` remembers the last report so that a user scroll while the
+ * sentinel is already out of view re-arms it. `armed` is only set on an
+ * observer leave (or a user scroll that finds the sentinel already off-screen),
+ * so a visible first-screen sentinel cannot page before the user interacts.
+ */
+export type SentinelPagingPhase = "idle" | "absorbing";
+
+export type SentinelPagingState = {
+  phase: SentinelPagingPhase;
+  armed: boolean;
+  intersecting: boolean;
+};
+
+export type SentinelPagingContext = {
+  renderedHasMore: boolean;
+  historyHasMore: boolean;
+  loadingOlderHistory: boolean;
+};
+
+export type SentinelPagingEvent =
+  | { type: "reset" }
+  | { type: "user-scroll" }
+  | { type: "observer"; intersecting: boolean }
+  | { type: "click" };
+
+export function createSentinelPagingState(): SentinelPagingState {
+  return { phase: "idle", armed: false, intersecting: true };
+}
+
+function decideSentinelPageAction(context: SentinelPagingContext): SentinelPageAction {
+  if (context.renderedHasMore) return "expand";
+  if (context.historyHasMore && !context.loadingOlderHistory) return "load-older";
+  return "none";
+}
+
+export function reduceSentinelPaging(
+  state: SentinelPagingState,
+  event: SentinelPagingEvent,
+  context: SentinelPagingContext,
+): { action: SentinelPageAction; state: SentinelPagingState } {
+  switch (event.type) {
+    case "reset":
+      return { action: "none", state: createSentinelPagingState() };
+
+    case "user-scroll": {
+      // A real user gesture ends the absorbing window. If the sentinel is
+      // already off-screen the user is scrolling back toward it, so arm now;
+      // the following observer enter is then a genuine user re-entry.
+      return {
+        action: "none",
+        state: {
+          phase: "idle",
+          armed: state.intersecting ? state.armed : true,
+          intersecting: state.intersecting,
+        },
+      };
+    }
+
+    case "click": {
+      const action = decideSentinelPageAction(context);
+      if (action === "none") return { action, state };
+      // An explicit click always pages immediately and opens an absorbing
+      // window so the observer cannot add a second automatic page for the very
+      // same operation.
+      return { action, state: { phase: "absorbing", armed: false, intersecting: true } };
+    }
+
+    case "observer": {
+      const intersecting = event.intersecting;
+      if (!intersecting) {
+        // Leave. Absorbed internal leaves never arm; a genuine leave does.
+        return {
+          action: "none",
+          state: state.phase === "absorbing"
+            ? { ...state, intersecting }
+            : { ...state, intersecting, armed: true },
+        };
+      }
+      // Enter. Internal re-entries during the absorbing window are ignored.
+      if (state.phase === "absorbing" || !state.armed) {
+        return { action: "none", state: { ...state, intersecting } };
+      }
+      const action = decideSentinelPageAction(context);
+      if (action === "none") return { action, state: { ...state, intersecting } };
+      return { action, state: { phase: "absorbing", armed: false, intersecting } };
+    }
+  }
+}
+
 export function captureScrollDistance(scrollHeight: number, scrollTop: number): number {
   return scrollHeight - scrollTop;
 }

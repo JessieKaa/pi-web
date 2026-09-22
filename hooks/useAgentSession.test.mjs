@@ -203,8 +203,8 @@ test("context usage refreshes from assistant completions and live agent state", 
   assert.match(source, /mergeWindowedHistory/);
   assert.match(chatWindowSource, /loadOlderHistory\(\)\.then/);
   assert.match(chatWindowSource, /historyHasMore/);
-  assert.match(chatWindowSource, /sentinelArmedRef/);
-  assert.match(chatWindowSource, /if \(!entries\[0\]\?\.isIntersecting\)/);
+  assert.match(chatWindowSource, /createSentinelPagingState/);
+  assert.match(chatWindowSource, /runSentinelEvent\(\{ type: "observer", intersecting: entry\.isIntersecting \}\)/);
 });
 
 test("new-session promotion rekeys drafts before publishing the real session", () => {

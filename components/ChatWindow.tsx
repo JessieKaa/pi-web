@@ -1,7 +1,7 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { ArrowDown, Bug, ChevronRight, Compass, ExternalLink, GitPullRequest, Sparkles, X } from "lucide-react";
-import { Fragment, cloneElement, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
+import { Fragment, cloneElement, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { AgentMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
@@ -26,19 +26,30 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { AppUpdateResponse } from "@/lib/api-types";
 import {
   captureScrollDistance,
-  decideSentinelPage,
+  createSentinelPagingState,
   getMinimumVisibleRenderCount,
   growVisibleCount,
   getPromptAnchorSpacerHeight,
   getVisibleRenderWindow,
   INITIAL_VISIBLE_COUNT,
+  reduceSentinelPaging,
   restoreScrollTop,
+  type SentinelPagingContext,
+  type SentinelPagingEvent,
 } from "@/lib/chat-lazy-load";
 import { SESSION_MESSAGE_WINDOW } from "@/lib/session-window";
 
 const ChatMinimap = lazy(() => import("./ChatMinimap").then((module) => ({
   default: module.ChatMinimap,
 })));
+
+// Keyboard keys that scroll the transcript. Only real scroll intent should
+// close the sentinel machine's absorbing window, so arbitrary key presses are
+// ignored.
+const SENTINEL_SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+function isSentinelScrollKey(key: string): boolean {
+  return SENTINEL_SCROLL_KEYS.has(key);
+}
 
 interface Props {
   session: SessionInfo | null;
@@ -312,12 +323,8 @@ type HistoryTranscriptProps = {
   loadingOlderHistory: boolean;
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
   lastUserMsgRef: RefObject<HTMLDivElement | null>;
-  sentinelRef: RefObject<HTMLButtonElement | null>;
-  sentinelArmedRef: RefObject<boolean>;
-  scrollContainerRef: RefObject<HTMLDivElement | null>;
-  prevScrollDistanceRef: RefObject<number | null>;
-  setVisibleCount: Dispatch<SetStateAction<number>>;
-  loadOlderHistory: () => Promise<number>;
+  sentinelRef: (node: HTMLButtonElement | null) => void;
+  onSentinelEvent: (event: SentinelPagingEvent) => void;
   toolResultsMap: Map<string, ToolResultMessage>;
   modelNames: Record<string, string>;
   messageCwd?: string;
@@ -344,11 +351,7 @@ const HistoryTranscript = memo(function HistoryTranscript({
   messageRefs,
   lastUserMsgRef,
   sentinelRef,
-  sentinelArmedRef,
-  scrollContainerRef,
-  prevScrollDistanceRef,
-  setVisibleCount,
-  loadOlderHistory,
+  onSentinelEvent,
   toolResultsMap,
   modelNames,
   messageCwd,
@@ -462,22 +465,7 @@ const HistoryTranscript = memo(function HistoryTranscript({
           className="block w-full py-3 text-center text-xs text-text-muted hover:text-text disabled:cursor-wait disabled:opacity-60"
           disabled={loadingOlderHistory && !hasMore}
           aria-busy={loadingOlderHistory && !hasMore}
-          onClick={() => {
-            const container = scrollContainerRef.current;
-            if (container) {
-              prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
-            }
-            // An explicit click always pages immediately, and disarms the
-            // observer so it cannot add a second automatic page right after.
-            sentinelArmedRef.current = false;
-            if (hasMore) {
-              setVisibleCount((previous) => growVisibleCount(previous, visibleCount));
-              return;
-            }
-            void loadOlderHistory().then((added) => {
-              if (added > 0) setVisibleCount((previous) => growVisibleCount(previous, visibleCount, added));
-            });
-          }}
+          onClick={() => onSentinelEvent({ type: "click" })}
         >
           {t("chat.loadEarlier", { count: hasMore ? startIndex : SESSION_MESSAGE_WINDOW })}
         </button>
@@ -591,9 +579,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   // Only render the last N messages initially. When the user scrolls to the
   // top, load another page while keeping the scroll position stable.
   const [requestedVisibleCount, setRequestedVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
-  const sentinelRef = useRef<HTMLButtonElement>(null);
+  const [sentinelElement, setSentinelElement] = useState<HTMLButtonElement | null>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
-  const sentinelArmedRef = useRef(false);
+  const sentinelStateRef = useRef(createSentinelPagingState());
 
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
   const transcriptSessionId = session?.id ?? sessionIdRef.current ?? undefined;
@@ -612,50 +600,91 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     [plan],
   );
   const visibleCount = Math.max(requestedVisibleCount, minimumVisibleCount);
+  const visibleCountRef = useRef(visibleCount);
+  visibleCountRef.current = visibleCount;
+
+  // Live paging context for the sentinel state machine. The IntersectionObserver
+  // outlives individual renders, so it reads the current flags from this ref.
+  const sentinelContextRef = useRef<SentinelPagingContext>({
+    renderedHasMore: false,
+    historyHasMore: false,
+    loadingOlderHistory: false,
+  });
+  sentinelContextRef.current = {
+    renderedHasMore: getVisibleRenderWindow(messages.length, visibleCount).hasMore,
+    historyHasMore,
+    loadingOlderHistory,
+  };
+
+  // Single entry point for every sentinel trigger (click, observer, user
+  // scroll). The state machine owns the cascade timing; this function only
+  // performs the action it returns.
+  const runSentinelEvent = useCallback((event: SentinelPagingEvent) => {
+    const { action, state } = reduceSentinelPaging(
+      sentinelStateRef.current,
+      event,
+      sentinelContextRef.current,
+    );
+    sentinelStateRef.current = state;
+    if (action === "none") return;
+    const container = scrollContainerRef.current;
+    if (container) {
+      prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
+    }
+    if (action === "expand") {
+      setRequestedVisibleCount((prev) => growVisibleCount(prev, visibleCountRef.current));
+      return;
+    }
+    void loadOlderHistory().then((added) => {
+      if (added > 0) setRequestedVisibleCount((prev) => growVisibleCount(prev, visibleCountRef.current, added));
+    });
+  }, [loadOlderHistory, scrollContainerRef, setRequestedVisibleCount]);
 
   useEffect(() => {
     setRequestedVisibleCount(INITIAL_VISIBLE_COUNT);
-    // The sentinel is not armed on a fresh session: a visible sentinel on the
-    // first screen must not trigger an immediate local + API page cascade.
-    sentinelArmedRef.current = false;
+    // A fresh session starts with an idle, unarmed sentinel: a visible sentinel
+    // on the first screen must not trigger an immediate local + API cascade.
+    sentinelStateRef.current = createSentinelPagingState();
   }, [sessionKey]);
 
-  // IntersectionObserver on the sentinel button at the top of the list. It
-  // only auto-pages after the sentinel has left the viewport and come back, so
-  // first-paint content keeps the reduced window; an explicit click still
-  // pages immediately.
+  // IntersectionObserver on the sentinel button at the top of the list, plus
+  // the real user-input signals that close the machine's absorbing window.
+  //
+  // The observer is deliberately connected to the sentinel element itself and
+  // not re-created when `visibleCount`/`messages.length` change: a re-created
+  // observer fires a synthetic initial callback that used to re-arm the
+  // sentinel and cascade a local expand into an API page. The state machine
+  // absorbs any residual self-inflicted notification until a real user scroll.
   useEffect(() => {
-    const sentinel = sentinelRef.current;
     const container = scrollContainerRef.current;
-    if (!sentinel || !container) return;
+    if (!sentinelElement || !container) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (!entries[0]?.isIntersecting) {
-          sentinelArmedRef.current = true;
-          return;
-        }
-        const { action, nextSentinelArmed } = decideSentinelPage({
-          sentinelArmed: sentinelArmedRef.current,
-          renderedHasMore: getVisibleRenderWindow(messages.length, visibleCount).hasMore,
-          historyHasMore,
-          loadingOlderHistory,
-        });
-        sentinelArmedRef.current = nextSentinelArmed;
-        if (action === "none") return;
-        prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
-        if (action === "expand") {
-          setRequestedVisibleCount((prev) => growVisibleCount(prev, visibleCount));
-          return;
-        }
-        void loadOlderHistory().then((added) => {
-          if (added > 0) setRequestedVisibleCount((prev) => growVisibleCount(prev, visibleCount, added));
-        });
+        const entry = entries[0];
+        if (!entry) return;
+        runSentinelEvent({ type: "observer", intersecting: entry.isIntersecting });
       },
-      { root: container, threshold: 0 }
+      { root: container, threshold: 0 },
     );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [visibleCount, messages.length, historyHasMore, loadingOlderHistory, loadOlderHistory, scrollContainerRef]);
+    observer.observe(sentinelElement);
+
+    const handleUserScroll = () => runSentinelEvent({ type: "user-scroll" });
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isSentinelScrollKey(event.key)) runSentinelEvent({ type: "user-scroll" });
+    };
+    container.addEventListener("wheel", handleUserScroll, { passive: true });
+    container.addEventListener("touchmove", handleUserScroll, { passive: true });
+    container.addEventListener("pointerdown", handleUserScroll, { passive: true });
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      observer.disconnect();
+      container.removeEventListener("wheel", handleUserScroll);
+      container.removeEventListener("touchmove", handleUserScroll);
+      container.removeEventListener("pointerdown", handleUserScroll);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [sentinelElement, runSentinelEvent, scrollContainerRef]);
 
   // After visibleCount increases (older messages prepended), restore the
   // scroll position in the same commit, before the browser paints, so the
@@ -1203,12 +1232,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               loadingOlderHistory={loadingOlderHistory}
               messageRefs={messageRefs}
               lastUserMsgRef={lastUserMsgRef}
-              sentinelRef={sentinelRef}
-              sentinelArmedRef={sentinelArmedRef}
-              scrollContainerRef={scrollContainerRef}
-              prevScrollDistanceRef={prevScrollDistanceRef}
-              setVisibleCount={setRequestedVisibleCount}
-              loadOlderHistory={loadOlderHistory}
+              sentinelRef={setSentinelElement}
+              onSentinelEvent={runSentinelEvent}
               toolResultsMap={toolResultsMap}
               modelNames={modelNames}
               messageCwd={messageCwd}
