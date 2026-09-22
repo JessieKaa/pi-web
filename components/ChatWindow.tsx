@@ -7,7 +7,7 @@ import type { AgentMessage, BashExecutionMessage, BlockingExtensionUiRequest, Ex
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
-import { buildChatRenderPlan, getAssistantMessageOverride, type ChatRenderPlanItem, type MessagePlanItem, type ThinkingPlanItem, type ThinkingSegmentPlan } from "@/lib/chat-render-plan";
+import { buildChatRenderPlan, getAssistantMessageOverride, type ChatRenderPlan, type ChatRenderPlanItem, type MessagePlanItem, type ThinkingPlanItem, type ThinkingSegmentPlan } from "@/lib/chat-render-plan";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
 import { MessageView, ThinkingBlock } from "./MessageView";
 import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
@@ -26,11 +26,13 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { AppUpdateResponse } from "@/lib/api-types";
 import {
   captureScrollDistance,
-  getNextVisibleCount,
+  decideSentinelPage,
+  getMinimumVisibleRenderCount,
+  growVisibleCount,
   getPromptAnchorSpacerHeight,
   getVisibleRenderWindow,
+  INITIAL_VISIBLE_COUNT,
   restoreScrollTop,
-  VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
 import { SESSION_MESSAGE_WINDOW } from "@/lib/session-window";
 
@@ -304,14 +306,14 @@ function useMessageRefs(count: number): RefObject<(HTMLDivElement | null)[]> {
 type HistoryTranscriptProps = {
   messages: AgentMessage[];
   entryIds: string[];
+  plan: ChatRenderPlan;
   visibleCount: number;
   historyHasMore: boolean;
   loadingOlderHistory: boolean;
-  isStreaming: boolean;
-  hasStreamingContent: boolean;
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
   lastUserMsgRef: RefObject<HTMLDivElement | null>;
   sentinelRef: RefObject<HTMLButtonElement | null>;
+  sentinelArmedRef: RefObject<boolean>;
   scrollContainerRef: RefObject<HTMLDivElement | null>;
   prevScrollDistanceRef: RefObject<number | null>;
   setVisibleCount: Dispatch<SetStateAction<number>>;
@@ -335,14 +337,14 @@ type HistoryTranscriptProps = {
 const HistoryTranscript = memo(function HistoryTranscript({
   messages,
   entryIds,
+  plan,
   visibleCount,
   historyHasMore,
   loadingOlderHistory,
-  isStreaming,
-  hasStreamingContent,
   messageRefs,
   lastUserMsgRef,
   sentinelRef,
+  sentinelArmedRef,
   scrollContainerRef,
   prevScrollDistanceRef,
   setVisibleCount,
@@ -362,14 +364,6 @@ const HistoryTranscript = memo(function HistoryTranscript({
   tokenSpeedEnabled,
   t,
 }: HistoryTranscriptProps) {
-  const plan = useMemo(() => buildChatRenderPlan({
-    messages,
-    entryIds,
-    isStreaming,
-    hasStreamingContent,
-    sessionId,
-  }), [entryIds, hasStreamingContent, isStreaming, messages, sessionId]);
-
   const attachVisibleRef = (sourceIndex: number, refIndex: number) => (element: HTMLDivElement | null) => {
     messageRefs.current[refIndex] = element;
     if (sourceIndex === plan.lastUserMessageIndex) {
@@ -473,12 +467,15 @@ const HistoryTranscript = memo(function HistoryTranscript({
             if (container) {
               prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
             }
+            // An explicit click always pages immediately, and disarms the
+            // observer so it cannot add a second automatic page right after.
+            sentinelArmedRef.current = false;
             if (hasMore) {
-              setVisibleCount((previous) => getNextVisibleCount(previous));
+              setVisibleCount((previous) => growVisibleCount(previous, visibleCount));
               return;
             }
             void loadOlderHistory().then((added) => {
-              if (added > 0) setVisibleCount((previous) => previous + added);
+              if (added > 0) setVisibleCount((previous) => growVisibleCount(previous, visibleCount, added));
             });
           }}
         >
@@ -593,18 +590,40 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   // --- Lazy-load historical messages ---
   // Only render the last N messages initially. When the user scrolls to the
   // top, load another page while keeping the scroll position stable.
-  const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
+  const [requestedVisibleCount, setRequestedVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const sentinelRef = useRef<HTMLButtonElement>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
-  const sentinelArmedRef = useRef(true);
+  const sentinelArmedRef = useRef(false);
+
+  const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
+  const transcriptSessionId = session?.id ?? sessionIdRef.current ?? undefined;
+  const plan = useMemo(() => buildChatRenderPlan({
+    messages,
+    entryIds,
+    isStreaming: streamState.isStreaming,
+    hasStreamingContent,
+    sessionId: transcriptSessionId,
+  }), [entryIds, hasStreamingContent, messages, streamState.isStreaming, transcriptSessionId]);
+  // A long tool/process turn appends many plan descriptors after the last user
+  // message. Keep the window at least large enough to render that message so
+  // `lastUserMsgRef` (and the prompt anchor) never points at an unmounted node.
+  const minimumVisibleCount = useMemo(
+    () => getMinimumVisibleRenderCount(plan, INITIAL_VISIBLE_COUNT),
+    [plan],
+  );
+  const visibleCount = Math.max(requestedVisibleCount, minimumVisibleCount);
 
   useEffect(() => {
-    setVisibleCount(VISIBLE_PAGE_SIZE);
-    sentinelArmedRef.current = true;
+    setRequestedVisibleCount(INITIAL_VISIBLE_COUNT);
+    // The sentinel is not armed on a fresh session: a visible sentinel on the
+    // first screen must not trigger an immediate local + API page cascade.
+    sentinelArmedRef.current = false;
   }, [sessionKey]);
 
-  // IntersectionObserver on the sentinel div at the top of the message list.
-  // When it becomes visible, load the next page of older messages.
+  // IntersectionObserver on the sentinel button at the top of the list. It
+  // only auto-pages after the sentinel has left the viewport and come back, so
+  // first-paint content keeps the reduced window; an explicit click still
+  // pages immediately.
   useEffect(() => {
     const sentinel = sentinelRef.current;
     const container = scrollContainerRef.current;
@@ -615,23 +634,28 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
           sentinelArmedRef.current = true;
           return;
         }
+        const { action, nextSentinelArmed } = decideSentinelPage({
+          sentinelArmed: sentinelArmedRef.current,
+          renderedHasMore: getVisibleRenderWindow(messages.length, visibleCount).hasMore,
+          historyHasMore,
+          loadingOlderHistory,
+        });
+        sentinelArmedRef.current = nextSentinelArmed;
+        if (action === "none") return;
         prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
-        const renderedHasMore = getVisibleRenderWindow(messages.length, visibleCount).hasMore;
-        if (renderedHasMore) {
-          setVisibleCount((prev) => getNextVisibleCount(prev));
+        if (action === "expand") {
+          setRequestedVisibleCount((prev) => growVisibleCount(prev, visibleCount));
           return;
         }
-        if (!historyHasMore || !sentinelArmedRef.current) return;
-        sentinelArmedRef.current = false;
         void loadOlderHistory().then((added) => {
-          if (added > 0) setVisibleCount((prev) => prev + added);
+          if (added > 0) setRequestedVisibleCount((prev) => growVisibleCount(prev, visibleCount, added));
         });
       },
       { root: container, threshold: 0 }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [visibleCount, messages.length, historyHasMore, loadOlderHistory, scrollContainerRef]);
+  }, [visibleCount, messages.length, historyHasMore, loadingOlderHistory, loadOlderHistory, scrollContainerRef]);
 
   // After visibleCount increases (older messages prepended), restore the
   // scroll position in the same commit, before the browser paints, so the
@@ -724,12 +748,11 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   }, [messages]);
   const messageRefs = useMessageRefs(visibleMessageCount);
   const revealHistoryForMinimap = useCallback(() => {
-    setVisibleCount((current) => Math.max(current, messages.length * 2));
+    setRequestedVisibleCount((current) => Math.max(current, messages.length * 2));
   }, [messages.length]);
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
   const homeCwdLabel = cwdBasename(newSessionCwd ?? session?.cwd);
-  const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
   const messageContentRef = useRef<HTMLDivElement | null>(null);
   const captureQuotedSelection = useCallback(() => {
@@ -1174,23 +1197,23 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             <HistoryTranscript
               messages={messages}
               entryIds={entryIds}
+              plan={plan}
               visibleCount={visibleCount}
               historyHasMore={historyHasMore}
               loadingOlderHistory={loadingOlderHistory}
-              isStreaming={streamState.isStreaming}
-              hasStreamingContent={hasStreamingContent}
               messageRefs={messageRefs}
               lastUserMsgRef={lastUserMsgRef}
               sentinelRef={sentinelRef}
+              sentinelArmedRef={sentinelArmedRef}
               scrollContainerRef={scrollContainerRef}
               prevScrollDistanceRef={prevScrollDistanceRef}
-              setVisibleCount={setVisibleCount}
+              setVisibleCount={setRequestedVisibleCount}
               loadOlderHistory={loadOlderHistory}
               toolResultsMap={toolResultsMap}
               modelNames={modelNames}
               messageCwd={messageCwd}
               onOpenFile={onOpenFile}
-              sessionId={session?.id ?? sessionIdRef.current ?? undefined}
+              sessionId={transcriptSessionId}
               isSubagentMode={subagentMode !== undefined}
               sessionBusy={sessionBusy}
               isNew={isNew}

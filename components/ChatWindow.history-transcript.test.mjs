@@ -10,10 +10,14 @@ const historySource = source.slice(
 
 test("memoizes the historical transcript and delegates grouping to the pure render plan", () => {
   assert.match(source, /const HistoryTranscript = memo\(function HistoryTranscript\(/);
-  assert.match(source, /<HistoryTranscript[\s\S]*?isStreaming=\{streamState\.isStreaming\}[\s\S]*?hasStreamingContent=\{hasStreamingContent\}/);
+  // The render plan is built once in ChatWindow (its deps are the message
+  // array and stream tail flags) and passed down so the minimum visible window
+  // can be computed before the transcript renders.
+  assert.match(source, /const plan = useMemo\(\(\) => buildChatRenderPlan\(/);
+  assert.match(source, /<HistoryTranscript[\s\S]*?plan=\{plan\}/);
+  assert.match(source, /isStreaming: streamState\.isStreaming,[\s\S]*?hasStreamingContent,/);
   assert.doesNotMatch(historySource, /streamingMessage/);
-  assert.match(historySource, /const plan = useMemo\(\(\) => buildChatRenderPlan\(/);
-  assert.match(historySource, /const rendered = visibleItems\.map\(\(item\) => renderItem\(item\)\)/);
+  assert.doesNotMatch(historySource, /buildChatRenderPlan\(/);
   assert.doesNotMatch(historySource, /splitThinkingBlocks|isConversationSegmentAnchor|findFinalAssistantIndex/);
 });
 
@@ -37,7 +41,40 @@ test("keeps the mixed sentinel count contract on render items and source message
   assert.match(historySource, /getVisibleRenderWindow\(plan\.items\.length, visibleCount\)/);
   assert.match(historySource, /count: hasMore \? startIndex : SESSION_MESSAGE_WINDOW/);
   assert.match(source, /getVisibleRenderWindow\(messages\.length, visibleCount\)\.hasMore/);
-  assert.match(source, /const \[visibleCount, setVisibleCount\] = useState\(VISIBLE_PAGE_SIZE\)/);
+  // The first window is deliberately smaller than one follow-up page.
+  assert.match(source, /const \[requestedVisibleCount, setRequestedVisibleCount\] = useState\(INITIAL_VISIBLE_COUNT\)/);
+  assert.match(source, /const visibleCount = Math\.max\(requestedVisibleCount, minimumVisibleCount\)/);
+});
+
+test("keeps the last user message mounted even when it falls outside the requested window", () => {
+  // A long tool/process turn appends many plan descriptors after the last user
+  // message. The window floor is derived from the render plan so the prompt
+  // anchor (`lastUserMsgRef`) can never point at an unmounted node.
+  assert.match(source, /getMinimumVisibleRenderCount\(plan, INITIAL_VISIBLE_COUNT\)/);
+  assert.match(source, /const minimumVisibleCount = useMemo\(/);
+  assert.match(source, /const visibleCount = Math\.max\(requestedVisibleCount, minimumVisibleCount\)/);
+  assert.match(source, /lastUserMsgRef/);
+});
+
+test("does not cascade a first-screen sentinel into local plus API pagination", () => {
+  // A fresh session starts disarmed and is re-armed only after the sentinel
+  // leaves the viewport, so a sentinel that is already visible on the first
+  // screen never triggers an immediate automatic page.
+  assert.match(source, /const sentinelArmedRef = useRef\(false\)/);
+  assert.match(source, /setRequestedVisibleCount\(INITIAL_VISIBLE_COUNT\);[\s\S]*?sentinelArmedRef\.current = false;/);
+  assert.match(source, /decideSentinelPage\(\{/);
+  assert.match(source, /sentinelArmed: sentinelArmedRef\.current/);
+  assert.match(source, /if \(action === "none"\) return;/);
+});
+
+test("keeps an explicit sentinel click immediate and prevents a follow-up auto page", () => {
+  assert.match(historySource, /setVisibleCount\(\(previous\) => growVisibleCount\(previous, visibleCount\)\)/);
+  assert.match(historySource, /void loadOlderHistory\(\)\.then\(\(added\) => \{/);
+  // The click handler disarms the observer for the page it just requested.
+  assert.match(
+    historySource,
+    /sentinelArmedRef\.current = false;[\s\S]*?if \(hasMore\) \{/,
+  );
 });
 
 test("keeps transcript loading, source ref ordinals, and branch controls in the memoized renderer", () => {
