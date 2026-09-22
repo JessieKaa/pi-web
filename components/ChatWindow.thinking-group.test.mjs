@@ -33,7 +33,7 @@ test("starts a new group when an extension continues after a final answer", () =
 });
 
 test("leaves only a genuinely streaming live tail ungrouped", () => {
-  assert.match(source, /const isLiveTail = streamState\.isStreaming && hasStreamingContent && endIdx === messages\.length && userIdx === lastAnchorIdx/);
+  assert.match(source, /const isLiveTail = isStreaming && hasStreamingContent && endIdx === messages\.length && userIdx === lastAnchorIdx/);
   assert.doesNotMatch(source, /const isLiveTail = \(sessionBusy \|\| streamState\.isStreaming\)/);
   assert.match(source, /if \(isLiveTail\) \{\s*for \(let renderIdx = userIdx; renderIdx < endIdx; renderIdx\+\+\) \{\s*rendered\.push\(renderMessage\(renderIdx\)\);/);
 });

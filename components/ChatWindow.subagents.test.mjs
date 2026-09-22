@@ -46,5 +46,6 @@ test("ChatWindow accepts an external composer that replaces the normal input", a
 
 test("read-only mode hides editable user-message callbacks", async () => {
   const source = await readFile(new URL("../components/ChatWindow.tsx", import.meta.url), "utf8");
-  assert.match(source, /onEditContent=\{subagentMode === undefined \? handleEditContent : undefined\}/);
+  assert.match(source, /isSubagentMode=\{subagentMode !== undefined\}/);
+  assert.match(source, /onEditContent=\{!isSubagentMode \? handleEditContent : undefined\}/);
 });

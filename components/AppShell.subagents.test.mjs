@@ -104,8 +104,9 @@ test("new durable children bump the sidebar refresh key", async () => {
 
 test("subagent transcripts never expose fork, continue, or branch navigation to a child runtime", async () => {
   const chat = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
-  assert.match(chat, /onFork=\{subagentMode !== undefined \|\| sessionBusy \|\| isNew/);
-  assert.match(chat, /onNavigate=\{subagentMode !== undefined \|\| sessionBusy \? undefined : handleNavigate\}/);
+  assert.match(chat, /isSubagentMode=\{subagentMode !== undefined\}/);
+  assert.match(chat, /onFork=\{isSubagentMode \|\| sessionBusy \|\| isNew/);
+  assert.match(chat, /onNavigate=\{isSubagentMode \|\| sessionBusy \? undefined : handleNavigate\}/);
   const shell = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
   assert.match(shell, /childSelected \? null : \(/);
   assert.doesNotMatch(shell, /childSelected[^]*navigate_tree/);
