@@ -14,7 +14,7 @@ test("root identity uses rootSessionId and falls back to the selected session", 
   const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
   assert.match(source, /const selectedRootId = selectedSession\s*\?\s*selectedSession\.rootSessionId \?\? selectedSession\.id\s*:\s*null/);
   assert.match(source, /const childSelected = selectedSession\?\.sessionRole === "subagent"/);
-  assert.match(source, /useSubagentTree\(\{\s*rootId: selectedRootId,\s*treeOpen: activeTopPanel === "subagents" \|\| desktopSubagentCardVisible,\s*childSelected,\s*\}\)/);
+  assert.match(source, /useSubagentTree\(\{\s*rootId: selectedRootId,\s*treeOpen: activeTopPanel === "subagents" \|\| desktopSubagentPollingEnabled,\s*childSelected,\s*\}\)/);
 });
 
 test("sidebar stays on the root while a child transcript is shown", async () => {
@@ -58,8 +58,7 @@ test("the breadcrumb call site seeds the chain with the real root session id", a
 
 test("live markers derive from active descendants, not RPC availability", async () => {
   const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-  // Wide desktop has no header badge (the card owns the count); the compact
-  // top bar's subagent button still derives its live dot from active descendants.
+  // The compact top bar's subagent button derives its live dot from active descendants.
   assert.doesNotMatch(source, /subagentsLive=\{hasActiveDescendant\(subagents\.data\?\.nodes\)\}/);
   assert.match(source, /hasActiveDescendant\(subagents\.data\?\.nodes\) \? \(/);
   assert.doesNotMatch(source, /subagents\.data\?\.rpcAvailable === true \? \(/);
@@ -73,20 +72,13 @@ test("missing selected child recovers to the nearest surviving durable ancestor"
   assert.match(source, /handleSelectSession\(cursor\)/);
 });
 
-test("wide desktop keeps subagent polling eligible for the right card", async () => {
+test("wide desktop keeps subagent polling eligible without a right context gutter", async () => {
   const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-  assert.match(source, /const desktopSubagentCardVisible = isWideDesktop;/);
-  assert.match(source, /treeOpen: activeTopPanel === "subagents" \|\| desktopSubagentCardVisible/);
-  assert.match(source, /desktop-workspace-context-stack/);
-  assert.match(source, /<DesktopSubagentCard/);
-  assert.match(source, /<DesktopConversationContext/);
-});
-
-test("desktop aside orders conversation context before subagents", async () => {
-  const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-  const contextIndex = source.indexOf("<DesktopConversationContext");
-  const subagentIndex = source.indexOf("<DesktopSubagentCard");
-  assert.ok(contextIndex >= 0 && subagentIndex > contextIndex);
+  assert.match(source, /const desktopSubagentPollingEnabled = isWideDesktop;/);
+  assert.match(source, /treeOpen: activeTopPanel === "subagents" \|\| desktopSubagentPollingEnabled/);
+  assert.doesNotMatch(source, /desktop-workspace-context/);
+  assert.doesNotMatch(source, /\bDesktopSubagentCard\b/);
+  assert.doesNotMatch(source, /\bDesktopConversationContext\b/);
 });
 
 test("the subagent popover anchors to its trigger and clamps to the viewport", async () => {

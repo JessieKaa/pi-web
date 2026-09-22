@@ -3,18 +3,18 @@ import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { ArrowDown, Bug, ChevronRight, Compass, ExternalLink, GitPullRequest, Sparkles, X } from "lucide-react";
 import { Fragment, cloneElement, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
+import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ThinkingContent, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks, splitThinkingBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
 import { MessageView, ThinkingBlock } from "./MessageView";
+import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { ConversationPlan, getConversationPlanWidget } from "./ConversationPlan";
-import { DesktopWidgetCards, filterSubagentWidgets, isPiSubagentWidgetKey } from "./ExtensionWidgets";
-import { DesktopSubagentWidgetCard } from "./SubagentSessions";
+import { filterSubagentWidgets } from "./ExtensionWidgets";
 import { GoalPanel } from "./GoalPanel";
 import { DialogShell } from "./DialogShell";
 import { filterGoalStatuses, filterGoalWidgets, resolveGoalPanelModel } from "@/lib/goal-panel";
@@ -59,8 +59,6 @@ interface Props {
   quoteSelectionEnabled?: boolean;
   initialPrompt?: string;
   onInitialPromptConsumed?: () => void;
-  /** Optional right-side slot rendered only inside the session workspace. */
-  desktopAside?: ReactNode;
   /** Completion sound state + controls, owned by AppShell so tasks finishing in
    *  a non-active workspace can still ring. */
   soundEnabled?: boolean;
@@ -72,8 +70,6 @@ interface Props {
     transcriptRefreshGeneration: number;
     composer: ReactNode;
   };
-  /** True when AppShell already mounted the RPC tree card in desktopAside. */
-  subagentTreeVisible?: boolean;
 }
 
 function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -271,13 +267,86 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, hasError = false, de
   );
 }
 
+type ThinkingSegment = {
+  block: ThinkingContent;
+  blockIndex: number;
+  entryId?: string;
+  sessionId?: string;
+  messageIndex: number;
+  duration?: number;
+};
+
+function ThinkingDetailsGroup({ segments, cwd, onOpenFile }: {
+  segments: ThinkingSegment[];
+  cwd?: string;
+  onOpenFile?: (filePath: string) => void;
+}) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(() => isThinkingExpandedByDefault());
+  useEffect(() => {
+    const onChange = () => setExpanded(isThinkingExpandedByDefault());
+    window.addEventListener(THINKING_EXPANDED_EVENT, onChange);
+    return () => window.removeEventListener(THINKING_EXPANDED_EVENT, onChange);
+  }, []);
+
+  const durationByMessage = new Map<number, number>();
+  for (const segment of segments) {
+    if (segment.duration !== undefined && !durationByMessage.has(segment.messageIndex)) {
+      durationByMessage.set(segment.messageIndex, segment.duration);
+    }
+  }
+  const duration = [...durationByMessage.values()].reduce((total, value) => total + value, 0);
+  const countLabel = `${segments.length} ${t(segments.length === 1 ? "chat.thinkingSegment" : "chat.thinkingSegments")}`;
+
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden", fontSize: "var(--text-ui)" }}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        title={expanded ? t("chat.collapseThinking") : t("chat.expandThinking")}
+        style={{
+          display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "6px 10px",
+          background: "var(--bg-panel)", border: "none", color: "var(--text-muted)", cursor: "pointer",
+          fontSize: "var(--text-ui)", textAlign: "left",
+        }}
+      >
+        <ChevronRight size={12} strokeWidth={1.6} aria-hidden="true" style={{ flexShrink: 0, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t("i18n.thinking")} · {countLabel}</span>
+        {duration > 0 ? (
+          <span style={{ marginLeft: "auto", fontSize: "var(--text-meta)", color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+        ) : null}
+      </button>
+      {expanded ? (
+        <div style={{ borderTop: "1px solid var(--border)", background: "var(--bg-panel)" }}>
+          {segments.map((segment, index) => (
+            <div key={`${segment.entryId ?? "thinking"}-${segment.messageIndex}-${segment.blockIndex}`} style={{ padding: "8px 10px", borderTop: index === 0 ? "none" : "1px solid var(--border)" }}>
+              <ThinkingBlock
+                block={segment.block}
+                blockIndex={segment.blockIndex}
+                entryId={segment.entryId}
+                sessionId={segment.sessionId}
+                isStreaming={false}
+                cwd={cwd}
+                onOpenFile={onOpenFile}
+                embedded
+                forceExpanded
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function useMessageRefs(count: number): RefObject<(HTMLDivElement | null)[]> {
   const refs = useRef<(HTMLDivElement | null)[]>([]);
   refs.current = Array(count).fill(null).map((_, i) => refs.current[i] ?? null);
   return refs;
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, desktopAside, playDoneSound = () => {}, unlockAudio, subagentMode, subagentTreeVisible = false, tokenSpeedEnabled = true }: Props) {
+export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, playDoneSound = () => {}, unlockAudio, subagentMode, tokenSpeedEnabled = true }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const playDoneSoundRef = useRef(playDoneSound);
@@ -360,23 +429,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   }
   prevAgentRunningRef.current = agentRunning;
   const activeConversationPlanWidget = conversationPlanWidget ?? planCacheRef.current.widget;
-  const subagentWidgets = visibleWidgets.filter((widget) => isPiSubagentWidgetKey(widget.key));
   const planFooterWidgets = conversationPlanWidget
     ? visibleWidgets.filter((widget) => widget !== conversationPlanWidget)
     : visibleWidgets;
-  const gutterWidgets = filterSubagentWidgets(planFooterWidgets);
-  const footerWidgets = gutterWidgets;
-  const contextGutter = desktopAside || subagentWidgets.length > 0 || gutterWidgets.length > 0 ? (
-    <div className="desktop-workspace-context">
-      {desktopAside}
-      {!subagentTreeVisible && subagentWidgets.length > 0 ? (
-        <DesktopSubagentWidgetCard widgets={subagentWidgets} />
-      ) : null}
-      {gutterWidgets.length > 0 ? (
-        <DesktopWidgetCards widgets={gutterWidgets} />
-      ) : null}
-    </div>
-  ) : null;
+  const footerWidgets = filterSubagentWidgets(planFooterWidgets);
 
   useEffect(() => {
     if (!extensionDialog || soundedExtensionDialogIdRef.current === extensionDialog.id) return;
@@ -937,10 +993,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               }}
             />
             {chatInputElement}
-            <ExtensionStatusBar statuses={visibleStatuses} widgets={footerWidgets} gutterDuplicate={gutterWidgets.length > 0} />
+            <ExtensionStatusBar statuses={visibleStatuses} widgets={footerWidgets} />
           </div>
         </div>
-        {contextGutter}
         </div>
       ) : (
       <div className="chat-workspace-body">
@@ -1091,6 +1146,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 let processRefIdx: number | undefined;
                 let processKey = "";
                 let processHasError = false;
+                let thinkingSegments: ThinkingSegment[] = [];
+                let thinkingRefIdx: number | undefined;
+                let thinkingKey = "";
                 const flushProcess = () => {
                   if (processViews.length === 0) return;
                   const refIndex = processRefIdx;
@@ -1110,18 +1168,45 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                   processRefIdx = undefined;
                   processHasError = false;
                 };
+                const flushThinking = () => {
+                  if (thinkingSegments.length === 0) return;
+                  const segments = thinkingSegments;
+                  const refIndex = thinkingRefIdx;
+                  if (segments.length === 1) {
+                    const segment = segments[0]!;
+                    rendered.push(
+                      <div key={`thinking-${thinkingKey}`} style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }} ref={refIndex === undefined ? undefined : (el) => { messageRefs.current[refIndex] = el; }}>
+                        <ThinkingBlock block={segment.block} blockIndex={segment.blockIndex} entryId={segment.entryId} sessionId={segment.sessionId} duration={segment.duration} cwd={messageCwd} onOpenFile={onOpenFile} />
+                      </div>,
+                    );
+                  } else {
+                    rendered.push(
+                      <div key={`thinking-group-${thinkingKey}`} style={{ marginBottom: 16 }} ref={refIndex === undefined ? undefined : (el) => { messageRefs.current[refIndex] = el; }}>
+                        <ThinkingDetailsGroup segments={segments} cwd={messageCwd} onOpenFile={onOpenFile} />
+                      </div>,
+                    );
+                  }
+                  thinkingSegments = [];
+                  thinkingRefIdx = undefined;
+                  thinkingKey = "";
+                };
 
-                // Flush each process segment before its next thinking block so
-                // reasoning stays outside the fold without reordering the turn.
+                // Keep contiguous reasoning outside the process folds. The
+                // accumulator crosses assistant entries but flushes as soon as
+                // a tool, text, custom entry, or other message interrupts it.
                 for (let processIdx = userIdx + 1; processIdx <= finalAssistantIdx; processIdx++) {
                   const processMessage = messages[processIdx];
                   const messageKey = entryIds[processIdx] ?? processIdx;
                   if (processMessage.role === "custom") {
+                    flushThinking();
                     if (processViews.length === 0) processKey = String(messageKey);
                     processViews.push(renderMessage(processIdx, { attachRef: false, keyPrefix: "process" }));
                     continue;
                   }
-                  if (processMessage.role !== "assistant") continue;
+                  if (processMessage.role !== "assistant") {
+                    flushThinking();
+                    continue;
+                  }
                   const blocks = processIdx === finalAssistantIdx ? finalSplit.processBlocks : getDisplayableAssistantBlocks(processMessage);
                   const groups = splitThinkingBlocks(blocks);
                   const lastProcessGroup = groups.findLast((group) => !group.thinking);
@@ -1136,15 +1221,21 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                       const duration = messageTimestamp && previousTimestamp
                         ? Math.round((messageTimestamp - previousTimestamp) / 1000)
                         : 0;
-                      const refIndex = visibleRefIndexByMessage.get(processIdx);
-                      rendered.push(
-                        <div key={`thinking-${key}`} style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }} ref={refIndex === undefined ? undefined : (el) => { messageRefs.current[refIndex] = el; }}>
-                          {group.blocks.map((block) => block.type === "thinking" && (
-                            <ThinkingBlock key={processMessage.content.indexOf(block)} block={block} blockIndex={processMessage.content.indexOf(block)} entryId={entryIds[processIdx]} sessionId={session?.id ?? sessionIdRef.current ?? undefined} duration={duration > 0 ? duration : undefined} cwd={messageCwd} onOpenFile={onOpenFile} />
-                          ))}
-                        </div>,
-                      );
+                      thinkingRefIdx ??= visibleRefIndexByMessage.get(processIdx);
+                      if (thinkingSegments.length === 0) thinkingKey = key;
+                      for (const block of group.blocks) {
+                        if (block.type !== "thinking") continue;
+                        thinkingSegments.push({
+                          block,
+                          blockIndex: processMessage.content.indexOf(block),
+                          entryId: entryIds[processIdx],
+                          sessionId: session?.id ?? sessionIdRef.current ?? undefined,
+                          messageIndex: processIdx,
+                          duration: duration > 0 ? duration : undefined,
+                        });
+                      }
                     } else {
+                      flushThinking();
                       if (processViews.length === 0) processKey = key;
                       processRefIdx ??= visibleRefIndexByMessage.get(processIdx);
                       processToolCount += countToolCallBlocks(group.blocks);
@@ -1157,6 +1248,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     }
                   }
                 }
+                flushThinking();
                 flushProcess();
 
                 if (finalAnswerMessage) {
@@ -1346,11 +1438,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         </div>,
         document.body,
       )}
-        <ExtensionStatusBar statuses={visibleStatuses} widgets={footerWidgets} gutterDuplicate={gutterWidgets.length > 0} />
+        <ExtensionStatusBar statuses={visibleStatuses} widgets={footerWidgets} />
         </div>
         </>
         </div>
-        {contextGutter}
         {isMobile ? null : (
           <Suspense fallback={null}>
             <ChatMinimap

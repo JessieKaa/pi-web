@@ -4725,12 +4725,7 @@ span.linenumber {
 .desktop-context-cache-rate strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .desktop-context-progress > span { transition: none; } }
 
-/* Compact desktop subagent card (right context gutter) */
-.desktop-workspace-context-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+/* Compact desktop subagent card */
 .desktop-subagent-card {
   width: 268px;
   overflow: hidden;
@@ -4865,45 +4860,6 @@ span.subagent-tree-disclosure { cursor: default; }
   .desktop-subagent-card [role="tree"] * { transition: none !important; }
 }
 
-/* DSCode wide-desktop task header */
-.task-header { height: 56px; display: flex; align-items: center; border-bottom: 1px solid var(--border); background: var(--bg); }
-.task-header-sidebar { width: 42px; height: 100%; display: grid; place-items: center; border: 0; border-right: 1px solid var(--border); color: var(--text-muted); background: transparent; cursor: pointer; }
-.task-header-sidebar:hover { color: var(--text); background: var(--bg-hover); }
-.task-header-copy { min-width: 0; flex: 1; padding: 0 14px; display: flex; flex-direction: column; gap: 2px; }
-.task-header-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); font-weight: var(--weight-semibold); }
-.task-header-copy span { color: var(--text-dim); font-size: var(--text-meta); }
-.task-header-actions { display: flex; align-items: center; gap: 4px; padding: 0 8px; }
-.task-header-actions > button,
-.task-header-menu-wrap > button { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; cursor: pointer; }
-.task-header-actions button:hover,
-.task-header-actions button[aria-pressed="true"] { color: var(--text); background: var(--bg-hover); }
-.task-header-menu-wrap { position: relative; }
-.task-header-menu {
-  position: absolute;
-  top: 34px;
-  right: 0;
-  z-index: 300;
-  width: 172px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg);
-  box-shadow: 0 6px 8px rgba(0, 0, 0, .14);
-}
-.task-header-menu button {
-  width: 100%;
-  height: 29px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 4px;
-  color: var(--text);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-.task-header-menu button:hover:not(:disabled) { background: var(--bg-hover); }
-.task-header-menu button:disabled { opacity: .4; cursor: default; }
-
 /* DSCode user bubbles */
 .chat-user-row { margin-bottom: 18px; display: flex; flex-direction: column; align-items: flex-end; }
 .chat-user-bubble { max-width: min(70%, 620px); padding: 10px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); color: var(--text); }
@@ -4944,30 +4900,6 @@ span.subagent-tree-disclosure { cursor: default; }
   outline-offset: 2px;
 }
 
-/* DSCode desktop workspace: center column container + context gutter */
-.app-center-column {
-  container-type: inline-size;
-  container-name: chat-center;
-}
+/* Desktop chat workspace */
 .chat-workspace-body { min-width: 0; min-height: 0; flex: 1; display: flex; overflow: hidden; }
 .chat-workspace-main { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.desktop-workspace-context { display: none; }
-@media (min-width: 1280px) {
-  @container chat-center (min-width: 760px) {
-    .desktop-workspace-context {
-      width: 292px;
-      padding: 16px 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      flex: 0 0 292px;
-      overflow: auto;
-    }
-    .extension-status-shelf.has-gutter-dup {
-      display: none;
-    }
-  }
-  @container chat-center (min-width: 1121px) {
-    .desktop-workspace-context { transform: translateX(-42px); }
-  }
-}

@@ -822,7 +822,7 @@ function TextBlock({ block, isStreaming, cwd, onOpenFile, sessionId }: { block: 
   return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} sessionId={sessionId} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
 }
 
-export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex, isStreaming, cwd, onOpenFile, defaultExpanded = false }: {
+export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex, isStreaming, cwd, onOpenFile, defaultExpanded = false, embedded = false, forceExpanded }: {
   block: ThinkingContent;
   duration?: number;
   sessionId?: string;
@@ -832,15 +832,20 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
   defaultExpanded?: boolean;
+  /** Render only the reasoning body inside a parent thinking group. */
+  embedded?: boolean;
+  /** Parent-controlled expansion for an embedded reasoning body. */
+  forceExpanded?: boolean;
 }) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(() => defaultExpanded || isThinkingExpandedByDefault());
+  const [userExpanded, setUserExpanded] = useState(() => defaultExpanded || isThinkingExpandedByDefault());
+  const expanded = forceExpanded ?? userExpanded;
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const onChange = () => setExpanded(isThinkingExpandedByDefault());
+    const onChange = () => setUserExpanded(isThinkingExpandedByDefault());
     window.addEventListener(THINKING_EXPANDED_EVENT, onChange);
     return () => window.removeEventListener(THINKING_EXPANDED_EVENT, onChange);
   }, []);
@@ -862,6 +867,20 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
     return () => { cancelled = true; };
   }, [block.deferred, blockIndex, content, entryId, expanded, sessionId, t]);
 
+  const reasoningBody = (
+    <div style={{ color: error ? "var(--error)" : "var(--text-muted)", fontSize: "var(--text-meta)" }}>
+      {loading || error ? (
+        loading ? t("i18n.loadingThinking") : error
+      ) : (
+        <SafeMarkdownBody className="markdown-thinking" isStreaming={isStreaming} cwd={cwd} sessionId={sessionId} onOpenFile={onOpenFile}>
+          {(block.deferred ? content : block.thinking) ?? ""}
+        </SafeMarkdownBody>
+      )}
+    </div>
+  );
+
+  if (embedded) return expanded ? reasoningBody : null;
+
   return (
     <div
       style={{
@@ -872,7 +891,9 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
       }}
     >
       <button
-        onClick={() => setExpanded((value) => !value)}
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setUserExpanded((value) => !value)}
         style={{
           display: "flex",
           alignItems: "center",
@@ -893,14 +914,8 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
         )}
       </button>
       {expanded && (
-        <div style={{ padding: "8px 10px", color: error ? "var(--error)" : "var(--text-muted)", fontSize: "var(--text-meta)", background: "var(--bg-panel)", borderTop: "1px solid var(--border)" }}>
-          {loading || error ? (
-            loading ? t("i18n.loadingThinking") : error
-          ) : (
-            <SafeMarkdownBody className="markdown-thinking" isStreaming={isStreaming} cwd={cwd} sessionId={sessionId} onOpenFile={onOpenFile}>
-              {(block.deferred ? content : block.thinking) ?? ""}
-            </SafeMarkdownBody>
-          )}
+        <div style={{ padding: "8px 10px", background: "var(--bg-panel)", borderTop: "1px solid var(--border)" }}>
+          {reasoningBody}
         </div>
       )}
     </div>

@@ -11,11 +11,11 @@ test("keeps recognized todos in the transcript after the agent settles", () => {
   assert.doesNotMatch(chat, /activeConversationPlanWidget = agentRunning \? conversationPlanWidget/);
   assert.match(chat, /filterSubagentWidgets\(planFooterWidgets\)/);
   assert.match(chat, /visibleWidgets\.filter/);
-  assert.match(chat, /subagentTreeVisible/);
-  assert.match(chat, /DesktopSubagentWidgetCard/);
-  assert.match(chat, /<DesktopWidgetCards widgets=\{gutterWidgets\}/);
-  assert.match(chat, /gutterDuplicate=\{gutterWidgets.length > 0\}/);
-  assert.match(chat, /isPiSubagentWidgetKey/);
+  assert.doesNotMatch(chat, /desktop-workspace-context/);
+  assert.doesNotMatch(chat, /\bDesktopSubagentWidgetCard\b/);
+  assert.doesNotMatch(chat, /\bDesktopWidgetCards\b/);
+  assert.doesNotMatch(chat, /gutterDuplicate/);
+  assert.doesNotMatch(chat, /isPiSubagentWidgetKey/);
   assert.match(chat, /<ConversationPlan[\s\S]*?widget=\{activeConversationPlanWidget\}/);
   assert.match(chat, /activeConversationPlanWidget \? \(/);
   assert.match(chat, /agentRunning && !prevAgentRunningRef\.current/);

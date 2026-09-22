@@ -35,13 +35,13 @@ test("keeps covered statistics and file controls out of interaction and focus", 
   assert.match(source, /aria-hidden=\{covered \? true : undefined\}/);
 });
 
-test("uses TaskHeader only on wide desktop and preserves narrower toolbars", () => {
+test("keeps the session toolbar compact at every desktop width", () => {
   assert.match(source, /const isWideDesktop = useIsWideDesktop\(\)/);
-  assert.match(source, /isWideDesktop && \([\s\S]*?<TaskHeader/);
-  assert.match(source, /!isMobile && !isWideDesktop[\s\S]*?renderChatToolbarActions\(false\)/);
+  assert.doesNotMatch(source, /\bTaskHeader\b/);
+  assert.match(source, /height: `calc\(\$\{isMobile \? TOP_BAR_ICON_BUTTON_SIZE_MOBILE : 36\}px \+ env\(safe-area-inset-top\)\)`/);
+  assert.match(source, /!isMobile && \([\s\S]*?renderProjectTrustWarning\(false\)[\s\S]*?renderChatToolbarActions\(false\)[\s\S]*?renderSessionStatsButton\(false\)/);
   assert.match(source, /isMobile && \([\s\S]*?data-mobile-toolbar="true"/);
   assert.match(source, /data-mobile-toolbar-actions="true"/);
-  assert.match(source, /isWideDesktop[\s\S]*?renderProjectTrustWarning\(false\)/);
   assert.match(source, /<BranchNavigator[\s\S]*?hideInlineButton/);
 });
 

@@ -27,7 +27,7 @@ import { Network,
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { CodexSidebar } from "./CodexSidebar";
 import { hasActiveDescendant, useSubagentTree } from "@/hooks/useSubagentTree";
-import { SessionBreadcrumb, SubagentComposer, SubagentTree, DesktopSubagentCard, buildBreadcrumbItems, countSubagentNodes, findSubagentNode } from "./SubagentSessions";
+import { SessionBreadcrumb, SubagentComposer, SubagentTree, buildBreadcrumbItems, countSubagentNodes, findSubagentNode } from "./SubagentSessions";
 import type { SubagentTreeNode } from "@/lib/api-types";
 import { ChatWindow } from "./ChatWindow";
 import { TabBar, type Tab } from "./TabBar";
@@ -40,8 +40,6 @@ const SettingsPage = lazy(() => import("./SettingsPage").then((module) => ({
 })));
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
-import { TaskHeader } from "./TaskHeader";
-import { DesktopConversationContext } from "./DesktopConversationContext";
 import { useTheme } from "@/hooks/useTheme";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { useI18n } from "@/hooks/useI18n";
@@ -59,7 +57,6 @@ import {
   showBrowserNotification,
 } from "@/lib/browser-notifications";
 import { getInitialNavigation } from "@/lib/initial-navigation";
-import { buildConversationContextModel } from "@/lib/conversation-context";
 import { clearLastOpen, getLastOpenSession, setLastOpenSession } from "@/lib/workspace-memory";
 import {
   getDefaultRightPanelWidth,
@@ -293,12 +290,6 @@ export function AppShell() {
 
   // Context usage — populated by ChatWindow, displayed in top bar
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
-  const conversationContextModel = sessionStats
-    ? buildConversationContextModel({
-        stats: sessionStats,
-        contextUsage,
-      })
-    : null;
   const handleContextUsageChange = useCallback((usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => {
     setContextUsage(usage);
   }, []);
@@ -783,12 +774,12 @@ export function AppShell() {
     ? selectedSession.rootSessionId ?? selectedSession.id
     : null;
   const childSelected = selectedSession?.sessionRole === "subagent";
-  // Wide desktop keeps the right-gutter card visible; polling must stay
-  // eligible so a newly started first child appears without opening the popover.
-  const desktopSubagentCardVisible = isWideDesktop;
+  // Keep the wide-desktop toolbar count current so a newly started first child
+  // appears before its subagent popover is opened.
+  const desktopSubagentPollingEnabled = isWideDesktop;
   const subagents = useSubagentTree({
     rootId: selectedRootId,
-    treeOpen: activeTopPanel === "subagents" || desktopSubagentCardVisible,
+    treeOpen: activeTopPanel === "subagents" || desktopSubagentPollingEnabled,
     childSelected,
   });
   const [rootSessionInfo, setRootSessionInfo] = useState<SessionInfo | null>(null);
@@ -1214,12 +1205,7 @@ export function AppShell() {
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
   const windowTitle = activeCwdName ? `${activeCwdName} - Pi Web` : "Pi Web";
-  const taskTitle = selectedSession?.name
-    || selectedSession?.firstMessage
-    || activeCwdName
-    || translate("i18n.newSession");
   const subagentCount = subagents.data ? countSubagentNodes(subagents.data.nodes) : 0;
-  const taskRunning = Boolean(selectedSession && runningSessionIds.has(selectedSession.id));
 
   useEffect(() => {
     const syncWindowTitle = () => {
@@ -1840,7 +1826,6 @@ export function AppShell() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar toggle */}
         <div ref={topBarRef} style={{ flexShrink: 0, background: "var(--bg-panel)" }}>
-        {!isWideDesktop && (
         <div style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: `calc(${isMobile ? TOP_BAR_ICON_BUTTON_SIZE_MOBILE : 36}px + env(safe-area-inset-top))`, paddingTop: "env(safe-area-inset-top)" }}>
           <button
             onClick={handleSidebarToggle}
@@ -1967,7 +1952,7 @@ export function AppShell() {
               )}
             </div>
           )}
-          {!isMobile && !isWideDesktop && (
+          {!isMobile && (
             <>
               {renderProjectTrustWarning(false)}
               {renderChatToolbarActions(false)}
@@ -1990,41 +1975,6 @@ export function AppShell() {
             />
           )}
         </div>
-        )}
-        {isWideDesktop && (
-          <>
-            <TaskHeader
-              title={taskTitle}
-              running={taskRunning}
-              sidebarOpen={sidebarOpen}
-              modified={selectedSession?.modified ?? null}
-              onToggleSidebar={() => setSidebarOpen((open) => !open)}
-              onViewHistory={handleViewFullHistory}
-              historyDisabled={!selectedSession}
-              onAutoName={() => void handleAutoName()}
-              autoNameDisabled={!selectedSession || selectedSession.transient || !((sessionStats?.userMessages ?? 0) > 0 || (selectedSession.messageCount ?? 0) > 0) || autoNameStatus.kind === "naming"}
-              onOpenBranches={() => toggleTopPanel("branches", true)}
-              onOpenSystem={() => toggleTopPanel("system", true)}
-              onToggleFiles={handleRightPanelToggle}
-              filePanelOpen={rightPanelOpen}
-            />
-            {renderProjectTrustWarning(false)}
-            {childSelected ? null : (
-            <BranchNavigator
-              tree={branchTree}
-              activeLeafId={branchActiveLeafId}
-              onLeafChange={handleBranchLeafChange}
-              inline
-              compact
-              containerRef={topBarRef}
-              open={activeTopPanel === "branches"}
-              onToggle={() => toggleTopPanel("branches")}
-              hasSession={showChat}
-              hideInlineButton
-            />
-            )}
-          </>
-        )}
           {/* Top panel dropdown — shared, only one active at a time */}
           {activeTopPanel && topPanelPos && (
             <div ref={topPanelRef} style={{
@@ -2324,31 +2274,6 @@ export function AppShell() {
               quoteSelectionEnabled={quoteSelectionEnabled}
               initialPrompt={pendingQuotePrompt?.sessionId === selectedSession?.id ? pendingQuotePrompt?.text : undefined}
               onInitialPromptConsumed={() => setPendingQuotePrompt(null)}
-              subagentTreeVisible={subagentCount > 0}
-              desktopAside={conversationContextModel || subagentCount > 0 ? (
-                <div className="desktop-workspace-context-stack">
-                  {conversationContextModel ? (
-                    <DesktopConversationContext
-                      model={conversationContextModel}
-                      onOpenDetails={() => toggleTopPanel("session")}
-                    />
-                  ) : null}
-                  {subagents.data && subagentCount > 0 ? (
-                    <DesktopSubagentCard
-                      nodes={subagents.data.nodes}
-                      selectedSessionId={childSelected && selectedSession ? selectedSession.id : null}
-                      rpcAvailable={subagents.data.rpcAvailable}
-                      stale={subagents.stale}
-                      callbacks={{
-                        onSelect: handleSubagentSelect,
-                        onControl: async (action, childSessionId, message) => {
-                          await subagents.control(action, childSessionId, message);
-                        },
-                      }}
-                    />
-                  ) : null}
-                </div>
-              ) : null}
               soundEnabled={soundEnabled}
               tokenSpeedEnabled={tokenSpeedEnabled}
               playDoneSound={playDoneSound}

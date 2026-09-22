@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { MessageView, getToolCallInputText, replaceUserMessageText } = await jiti.import("./MessageView.tsx");
+const { MessageView, ThinkingBlock, getToolCallInputText, replaceUserMessageText } = await jiti.import("./MessageView.tsx");
 const { I18nProvider } = await jiti.import("../hooks/useI18n.tsx");
 
 const source = await import("node:fs").then((fs) => fs.readFileSync(new URL("./MessageView.tsx", import.meta.url), "utf8"));
@@ -147,6 +147,22 @@ test("renders thinking content through the shared Markdown renderer", async () =
   assert.match(source, /<SafeMarkdownBody className="markdown-thinking"/);
   assert.match(source, /isStreaming=\{isStreaming\} cwd=\{cwd\} onOpenFile=\{onOpenFile\}/);
   assert.doesNotMatch(source, /whiteSpace: "pre-wrap",\s*background: "var\(--bg-panel\)"/);
+});
+
+test("renders forced-open grouped thinking without a nested disclosure", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(I18nProvider, null,
+      React.createElement(ThinkingBlock, {
+        block: { type: "thinking", thinking: "Grouped reasoning" },
+        blockIndex: 0,
+        embedded: true,
+        forceExpanded: true,
+      }),
+    ),
+  );
+
+  assert.match(html, /Grouped reasoning/);
+  assert.doesNotMatch(html, /<button/);
 });
 
 function assistantWithThinkingAndTool() {
