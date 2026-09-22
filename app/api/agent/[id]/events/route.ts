@@ -11,12 +11,16 @@ export async function GET(
   const { id } = await params;
   if (req.signal.aborted) return new Response(null, { status: 204 });
 
-  // Fast path: already-running session
+  // Observing a historical transcript must not instantiate an AgentSession.
+  // Only the composer opens an explicit `start=1` transport immediately before
+  // it sends a prompt. A live wrapper remains observable from either mode.
+  const startsRuntime = new URL(req.url).searchParams.get("start") === "1";
   const session = getRpcSession(id);
   let sessionPromise;
   if (session?.isAlive()) {
     sessionPromise = Promise.resolve(session);
   } else {
+    if (!startsRuntime) return new Response(null, { status: 204 });
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return new Response("Session not found", { status: 404 });

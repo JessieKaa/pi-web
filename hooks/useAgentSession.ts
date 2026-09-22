@@ -349,6 +349,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const eventStreamGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventStreamGraceGenerationRef = useRef(0);
   const eventStreamGraceActiveRef = useRef(false);
+  // Reconnect only while a live run (or its terminal grace) is known. This
+  // keeps selecting a persisted transcript from cold-starting an AgentSession.
+  const eventStreamDemandRef = useRef(false);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const readOnlyHistoryRef = useRef(Boolean(opts.readOnlyHistory));
   readOnlyHistoryRef.current = Boolean(opts.readOnlyHistory);
@@ -426,14 +429,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   sessionPropIdRef.current = session?.id ?? null;
   sessionRunningRef.current = Boolean(sessionRunning);
+  eventStreamDemandRef.current = Boolean(sessionRunning)
+    || agentRunningRef.current
+    || rpcPromptPendingRef.current
+    || eventStreamGraceActiveRef.current;
 
   if (!eventConnectionRef.current) {
     eventConnectionRef.current = new AgentEventConnection({
-      createSource: (sid) => new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`),
+      createSource: (sid, { startsRuntime }) => new EventSource(
+        `/api/agent/${encodeURIComponent(sid)}/events${startsRuntime ? "?start=1" : ""}`,
+      ),
       onEvent: (event) => handleAgentEventRef.current?.(event as AgentEvent),
       shouldMaintain: (sid) => (
         sessionHookMountedRef.current
         && sessionIdRef.current === sid
+        && eventStreamDemandRef.current
         && !readOnlyHistoryRef.current
       ),
       readinessTimeoutMs: EVENT_STREAM_READY_TIMEOUT_MS,
@@ -839,24 +849,34 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     eventConnectionRef.current?.close();
   }, []);
 
-  const ensureEventsConnected = useCallback((sid: string, force = false) => (
-    eventConnectionRef.current!.ensureConnected(sid, { force })
+  const ensureEventsConnected = useCallback((sid: string, force = false, startsRuntime = false) => (
+    eventConnectionRef.current!.ensureConnected(sid, { force, startsRuntime })
   ), []);
 
   const maintainEventsConnected = useCallback((sid: string) => {
     eventConnectionRef.current!.maintain(sid);
   }, []);
 
-  // Keep SSE open while this session is selected so the server lease stays live.
+  // Observe a selected session only while the running-session snapshot or this
+  // tab's prompt state says it has a live runtime. Historical browsing stays
+  // disk-backed and does not acquire an SSE lease.
   useEffect(() => {
     if (!session?.id || opts.readOnlyHistory) return;
     const sid = session.id;
+    const needsEvents = Boolean(sessionRunning)
+      || agentRunningRef.current
+      || rpcPromptPendingRef.current
+      || eventStreamGraceActiveRef.current;
+    if (!needsEvents) {
+      closeEvents();
+      return;
+    }
     maintainEventsConnected(sid);
     const timer = setInterval(() => {
       if (sessionIdRef.current === sid) maintainEventsConnected(sid);
     }, getSessionLeaseHeartbeatMs());
     return () => clearInterval(timer);
-  }, [maintainEventsConnected, opts.readOnlyHistory, session?.id]);
+  }, [closeEvents, maintainEventsConnected, opts.readOnlyHistory, session?.id, sessionRunning]);
 
   const respondToExtensionUi = useCallback(async (
     request: ExtensionUiDialogRequest,
@@ -1050,8 +1070,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
         eventStreamGraceActiveRef.current = false;
         eventStreamGraceTimerRef.current = null;
-        if (sessionIdRef.current === sid) maintainEventsConnected(sid);
-        else closeEvents();
+        // The grace window is only for late terminal events. Do not retain an
+        // idle runtime merely because its transcript is selected.
+        closeEvents();
       } catch {
         // Keep the stream alive while state cannot be verified.
         if (
@@ -1557,6 +1578,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentLifecycleGenerationRef.current += 1;
     clearConversationPlanWidget();
     agentRunningRef.current = true;
+    eventStreamDemandRef.current = true;
     setAgentRunning(true);
     setAgentPhase(isSlashCommandPrompt ? { kind: "running_command" } : { kind: "waiting_model" });
     dispatch({ type: "start" });
@@ -1580,7 +1602,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
           }
         }
-        await ensureEventsConnected(sid, true);
+        await ensureEventsConnected(sid, true, true);
         promptRequestStarted = true;
         const promptResult = await sendAgentCommand<{ promptGeneration?: number } | null>(sid, {
           type: "prompt",
@@ -1593,7 +1615,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         promoteNewSession(1, message);
       } else if (session) {
         sentSessionId = session.id;
-        await ensureEventsConnected(session.id, true);
+        await ensureEventsConnected(session.id, true, true);
         promptRequestStarted = true;
         const promptResult = await sendAgentCommand<{ promptGeneration?: number } | null>(session.id, {
           type: "prompt",

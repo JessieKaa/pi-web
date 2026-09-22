@@ -29,12 +29,14 @@ type Attempt = {
 
 type Connection = {
   sessionId: string;
+  /** Whether this transport was explicitly allowed to cold-start a runtime. */
+  startsRuntime: boolean;
   source: AgentEventSourceLike;
   attempt: Attempt;
 };
 
 export interface AgentEventConnectionOptions {
-  createSource(sessionId: string): AgentEventSourceLike;
+  createSource(sessionId: string, options: { startsRuntime: boolean }): AgentEventSourceLike;
   onEvent(event: AgentEventLike): void;
   shouldMaintain(sessionId: string): boolean;
   readinessTimeoutMs: number;
@@ -46,6 +48,8 @@ export interface AgentEventConnectionOptions {
 
 export interface EnsureConnectedOptions {
   force?: boolean;
+  /** Use only immediately before an action that intentionally starts a runtime. */
+  startsRuntime?: boolean;
 }
 
 const EVENT_SOURCE_OPEN = 1;
@@ -91,10 +95,15 @@ export class AgentEventConnection {
 
   async ensureConnected(sessionId: string, options: EnsureConnectedOptions = {}): Promise<void> {
     let force = Boolean(options.force);
+    const startsRuntime = Boolean(options.startsRuntime);
     while (true) {
       let connection = this.current;
-      if (!connection || connection.sessionId !== sessionId) {
-        connection = this.open(sessionId);
+      // An observe-only source must be upgraded before an explicit action can
+      // rely on it to cold-start the runtime. The inverse is safe: a source
+      // that was allowed to start remains a valid observer once it is ready.
+      const needsRuntimeStartUpgrade = startsRuntime && !connection?.startsRuntime;
+      if (!connection || connection.sessionId !== sessionId || needsRuntimeStartUpgrade) {
+        connection = this.open(sessionId, startsRuntime);
         force = false;
       } else if (
         connection.attempt.ready
@@ -121,13 +130,13 @@ export class AgentEventConnection {
     }
   }
 
-  private open(sessionId: string): Connection {
+  private open(sessionId: string, startsRuntime = false): Connection {
     if (this.current) this.discard(this.current, new AgentEventConnectionError("closed"));
     this.lastEventAt = this.now();
 
     let source: AgentEventSourceLike;
     try {
-      source = this.options.createSource(sessionId);
+      source = this.options.createSource(sessionId, { startsRuntime });
     } catch (error) {
       throw new AgentEventConnectionError(
         "closed",
@@ -161,7 +170,7 @@ export class AgentEventConnection {
         reject(error);
       },
     };
-    const connection: Connection = { sessionId, source, attempt };
+    const connection: Connection = { sessionId, startsRuntime, source, attempt };
     this.current = connection;
 
     source.onmessage = (message) => {

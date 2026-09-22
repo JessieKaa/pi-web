@@ -350,10 +350,11 @@ test("delegates event stream readiness and hides an empty agent phase", () => {
 
   assert.match(source, /new AgentEventConnection\(\{/);
   assert.match(source, /shouldMaintain: \(sid\)[\s\S]*?sessionIdRef\.current === sid/);
-  assert.match(ensureSource, /eventConnectionRef\.current!\.ensureConnected\(sid, \{ force \}\)/);
+  assert.match(ensureSource, /eventConnectionRef\.current!\.ensureConnected\(sid, \{ force, startsRuntime \}\)/);
   assert.match(ensureSource, /eventConnectionRef\.current!\.maintain\(sid\)/);
-  assert.match(source, /await ensureEventsConnected\(sid, true\)/);
-  assert.match(source, /await ensureEventsConnected\(session\.id, true\)/);
+  assert.match(source, /await ensureEventsConnected\(sid, true, true\)/);
+  assert.match(source, /await ensureEventsConnected\(session\.id, true, true\)/);
+  assert.match(source, /startsRuntime \? "\?start=1" : ""/);
   assert.match(chatWindowSource, /const hasStreamingContent = Boolean\(streamState\.streamingMessage\?\.content\.length\)/);
   assert.match(chatWindowSource, /streamState\.isStreaming && hasStreamingContent && streamState\.streamingMessage/);
   assert.match(chatWindowSource, /agentRunning && !hasStreamingContent && agentPhase/);
@@ -365,15 +366,18 @@ test("uses one absolute agent-readiness deadline instead of a five-second transp
   assert.doesNotMatch(source, /EVENT_STREAM_OPEN_TIMEOUT_MS/);
 });
 
-test("maintains the selected session connection without another browser's running report", () => {
+test("keeps historical session browsing passive and only leases known live runs", () => {
   assert.match(source, /sessionRunning\?: boolean/);
-  // The hook maintains SSE for any selected, non-read-only session and renews the
-  // server lease on a heartbeat, so a run started in another browser no longer has
-  // to be reported through sessionRunning for this tab to stay connected.
-  assert.match(
-    source,
-    /if \(!session\?\.id \|\| opts\.readOnlyHistory\) return;[\s\S]*?maintainEventsConnected\(sid\)[\s\S]*?setInterval\(\(\) => \{\s*if \(sessionIdRef\.current === sid\) maintainEventsConnected\(sid\);\s*\}, getSessionLeaseHeartbeatMs\(\)\)/,
+  const maintenanceSource = source.slice(
+    source.indexOf("  // Observe a selected session only while"),
+    source.indexOf("  const respondToExtensionUi"),
   );
+  assert.match(maintenanceSource, /const needsEvents = Boolean\(sessionRunning\)/);
+  assert.match(maintenanceSource, /if \(!needsEvents\) \{\s*closeEvents\(\);\s*return;/);
+  assert.match(maintenanceSource, /maintainEventsConnected\(sid\)/);
+  assert.match(maintenanceSource, /getSessionLeaseHeartbeatMs\(\)/);
+  assert.match(source, /eventStreamDemandRef\.current/);
+  assert.match(source, /\?start=1/);
   assert.doesNotMatch(source, /void connectEvents\(/);
   assert.match(chatWindowSource, /sessionRunning\?: boolean/);
   assert.match(chatWindowSource, /session, sessionRunning, newSessionCwd/);
