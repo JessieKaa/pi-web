@@ -19,6 +19,7 @@ import {
   Moon,
   Plug,
   SlidersHorizontal,
+  Sparkles,
   Sun,
   ThermometerSun,
   Volume2,
@@ -44,6 +45,23 @@ import {
   isThinkingExpandedByDefault,
   setThinkingExpandedByDefault,
 } from "@/lib/thinking-expansion-preference";
+import {
+  buildTitleModelOptions,
+  buildTitleProviderOptions,
+  buildTitleThinkingOptions,
+  changeTitleModel,
+  changeTitleProvider,
+  changeTitleThinking,
+  defaultTitleSelection,
+  isTitleModelAvailable,
+  normalizeTitlePreference,
+  preferenceFromSelection,
+  selectionFromPreference,
+  titleThinkingLevelsFor,
+  type TitleGenerationModels,
+  type TitleGenerationPreference,
+  type TitleGenerationSelection,
+} from "./title-generation-selection";
 
 type SettingsSection = "general" | "remote" | "archived" | "models" | "skills" | "plugins" | "subagents";
 
@@ -130,6 +148,12 @@ export function SettingsPage({
   const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [cacheWarmingMode, setCacheWarmingMode] = useState<CacheWarmingMode | null>(null);
+  const [titlePreference, setTitlePreference] = useState<TitleGenerationPreference | null>(null);
+  const [titleModels, setTitleModels] = useState<TitleGenerationModels | null>(null);
+  const [titleOverride, setTitleOverride] = useState<TitleGenerationSelection | null>(null);
+  const [titleLoading, setTitleLoading] = useState(true);
+  const [titleSaving, setTitleSaving] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
 
   useEffect(() => {
     setThinkingExpanded(isThinkingExpandedByDefault());
@@ -159,6 +183,125 @@ export function SettingsPage({
       body: JSON.stringify({ mode, cwd: cwd ?? undefined }),
     }).catch(() => {});
   }, [cwd]);
+
+  // Session title generation keeps its preference server-side (no new config file).
+  // The models are scoped to the active project, so both requests are loaded together.
+  const loadTitleSettings = useCallback(async () => {
+    setTitleLoading(true);
+    setTitleError(null);
+    try {
+      const preferenceRequest = fetch("/api/title-generation-settings", { cache: "no-store" }).then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json() as { preference?: unknown };
+        return normalizeTitlePreference(data?.preference);
+      });
+      const modelsRequest = cwd
+        ? fetch(`/api/models?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" }).then(async (response) => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.json() as TitleGenerationModels;
+          })
+        : Promise.resolve(null);
+      const [preference, models] = await Promise.all([preferenceRequest, modelsRequest]);
+      setTitlePreference(preference);
+      setTitleModels(models);
+      setTitleOverride(null);
+    } catch (cause) {
+      setTitleError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setTitleLoading(false);
+    }
+  }, [cwd]);
+
+  useEffect(() => {
+    void loadTitleSettings();
+  }, [loadTitleSettings]);
+
+  const titleSelection = titleOverride
+    ?? (titlePreference ? selectionFromPreference(titlePreference) : null)
+    ?? (titleModels ? defaultTitleSelection(titleModels) : null);
+  const titleFollowSession = titlePreference === null && titleOverride === null;
+  // A stored model outside the current scope stays visible and is never rewritten
+  // until the user picks a replacement (which saves a complete new preference).
+  const titleSelectionUnavailable = !titleFollowSession && titleSelection !== null && titleModels !== null && (
+    !isTitleModelAvailable(titleModels, titleSelection.provider, titleSelection.modelId)
+    || !titleThinkingLevelsFor(titleModels, titleSelection.provider, titleSelection.modelId).includes(titleSelection.thinkingLevel)
+  );
+  const titleProviderOptions = titleModels
+    ? buildTitleProviderOptions(titleModels, titleSelection?.provider ?? null)
+    : [];
+  const titleModelOptions = titleModels && titleSelection
+    ? buildTitleModelOptions(titleModels, titleSelection.provider, titleSelection.modelId)
+    : [];
+  const titleThinkingOptions = titleModels && titleSelection
+    ? buildTitleThinkingOptions(titleModels, titleSelection.provider, titleSelection.modelId, titleSelection.thinkingLevel)
+    : [];
+
+  const saveTitleSelection = useCallback(async (selection: TitleGenerationSelection) => {
+    setTitleOverride(selection);
+    setTitleSaving(true);
+    setTitleError(null);
+    try {
+      const response = await fetch("/api/title-generation-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preference: preferenceFromSelection(selection) }),
+      });
+      const data = await response.json().catch(() => null) as { preference?: unknown; error?: string } | null;
+      if (!response.ok) throw new Error(data?.error ?? `HTTP ${response.status}`);
+      setTitlePreference(normalizeTitlePreference(data?.preference) ?? preferenceFromSelection(selection));
+      setTitleOverride(null);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      // loadTitleSettings() clears the error while running, so re-sync first and
+      // surface the save failure afterwards or the message disappears.
+      setTitleOverride(null);
+      await loadTitleSettings();
+      setTitleError(message);
+    } finally {
+      setTitleSaving(false);
+    }
+  }, [loadTitleSettings]);
+
+  const resetTitleSelection = useCallback(async () => {
+    setTitleSaving(true);
+    setTitleError(null);
+    try {
+      const response = await fetch("/api/title-generation-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preference: null }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(data?.error ?? `HTTP ${response.status}`);
+      }
+      setTitlePreference(null);
+      setTitleOverride(null);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setTitleOverride(null);
+      await loadTitleSettings();
+      setTitleError(message);
+    } finally {
+      setTitleSaving(false);
+    }
+  }, [loadTitleSettings]);
+
+  const handleTitleProviderChange = useCallback((provider: string) => {
+    if (!titleModels || !titleSelection) return;
+    const next = changeTitleProvider(titleModels, titleSelection, provider);
+    if (next) void saveTitleSelection(next);
+  }, [saveTitleSelection, titleModels, titleSelection]);
+
+  const handleTitleModelChange = useCallback((modelId: string) => {
+    if (!titleModels || !titleSelection) return;
+    void saveTitleSelection(changeTitleModel(titleModels, titleSelection, modelId));
+  }, [saveTitleSelection, titleModels, titleSelection]);
+
+  const handleTitleThinkingChange = useCallback((thinkingLevel: string) => {
+    if (!titleSelection) return;
+    void saveTitleSelection(changeTitleThinking(titleSelection, thinkingLevel));
+  }, [saveTitleSelection, titleSelection]);
 
   const close = useCallback(() => {
     onModelsChanged();
@@ -359,6 +502,81 @@ export function SettingsPage({
               </button>
             ))}
           </div>
+        </section>
+        <section className="settings-form-section settings-form-section-stack">
+          <div className="settings-form-label">
+            <Sparkles size={16} aria-hidden="true" />
+            <div><strong>{t("settings.titleGeneration")}</strong><span>{t("settings.titleGenerationDescription")}</span></div>
+          </div>
+          {titleLoading ? (
+            <span className="settings-status">{t("sidebar.loading")}</span>
+          ) : (
+            <>
+              <div className="settings-password-stack">
+                <label>
+                  <span>{t("settings.titleGenerationProvider")}</span>
+                  <select
+                    value={titleSelection?.provider ?? ""}
+                    disabled={!titleModels || titleSaving}
+                    onChange={(event) => handleTitleProviderChange(event.target.value)}
+                  >
+                    {titleProviderOptions.map((option) => (
+                      <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>{t("settings.titleGenerationModel")}</span>
+                  <select
+                    value={titleSelection?.modelId ?? ""}
+                    disabled={!titleModels || titleSaving || titleModelOptions.length === 0}
+                    onChange={(event) => handleTitleModelChange(event.target.value)}
+                  >
+                    {titleModelOptions.map((option) => (
+                      <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>{t("settings.titleGenerationThinking")}</span>
+                  <select
+                    value={titleSelection?.thinkingLevel ?? ""}
+                    disabled={!titleModels || titleSaving || titleThinkingOptions.length === 0}
+                    onChange={(event) => handleTitleThinkingChange(event.target.value)}
+                  >
+                    {titleThinkingOptions.map((option) => (
+                      <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="settings-form-actions">
+                <button
+                  type="button"
+                  className="settings-secondary-button"
+                  aria-pressed={titleFollowSession}
+                  disabled={titleSaving}
+                  onClick={() => void resetTitleSelection()}
+                >
+                  {t("settings.titleGenerationFollowSession")}
+                </button>
+              </div>
+              {!cwd && <span className="settings-status">{t("settings.titleGenerationProjectRequired")}</span>}
+              {cwd && titleModels && titleModels.modelList.length === 0 && (
+                <span className="settings-status">{t("settings.titleGenerationNoModels")}</span>
+              )}
+              {titleFollowSession && <span className="settings-status">{t("settings.titleGenerationFollowing")}</span>}
+              {titleSelectionUnavailable && (
+                <div className="settings-inline-error" role="alert">{t("settings.titleGenerationUnavailable")}</div>
+              )}
+            </>
+          )}
+          {titleError && (
+            <div className="settings-inline-error" role="alert">
+              {titleError}
+              <button type="button" className="settings-text-action" onClick={() => void loadTitleSettings()}>{t("settings.titleGenerationRetry")}</button>
+            </div>
+          )}
         </section>
         <section className="settings-form-section">
           <div className="settings-form-label"><MessageSquare size={16} aria-hidden="true" /><div><strong>{t("settings.chat")}</strong><span>{t("settings.quoteSelection")}</span></div></div>

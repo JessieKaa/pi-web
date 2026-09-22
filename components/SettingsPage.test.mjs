@@ -128,6 +128,41 @@ test("cache warming is a pi setting owned by the general section", () => {
   assert.match(settings, /CACHE_WARMING_OPTIONS: CacheWarmingMode\[\] = \["off", "streaming", "idle"\]/);
 });
 
+test("general settings own the session title generation preference", () => {
+  assert.match(settings, /fetch\("\/api\/title-generation-settings", \{ cache: "no-store" \}\)/);
+  assert.match(settings, /fetch\(`\/api\/models\?cwd=\$\{encodeURIComponent\(cwd\)\}`/);
+  assert.match(settings, /body: JSON\.stringify\(\{ preference: preferenceFromSelection\(selection\) \}\)/);
+  assert.match(settings, /body: JSON\.stringify\(\{ preference: null \}\)/);
+  assert.match(settings, /settings\.titleGenerationFollowSession/);
+  assert.match(settings, /aria-pressed=\{titleFollowSession\}/);
+  assert.match(settings, /buildTitleProviderOptions\(titleModels/);
+  assert.match(settings, /buildTitleModelOptions\(titleModels/);
+  assert.match(settings, /buildTitleThinkingOptions\(titleModels/);
+  assert.match(settings, /titleThinkingLevelsFor\(titleModels/);
+  assert.match(settings, /normalizeTitlePreference\(data\?\.preference\)/);
+  assert.match(settings, /Sparkles/);
+});
+
+test("session title generation labels exist in both locales", () => {
+  const keys = [
+    "settings.titleGeneration",
+    "settings.titleGenerationDescription",
+    "settings.titleGenerationProvider",
+    "settings.titleGenerationModel",
+    "settings.titleGenerationThinking",
+    "settings.titleGenerationFollowSession",
+    "settings.titleGenerationFollowing",
+    "settings.titleGenerationUnavailable",
+    "settings.titleGenerationProjectRequired",
+    "settings.titleGenerationNoModels",
+    "settings.titleGenerationRetry",
+  ];
+  for (const key of keys) {
+    assert.ok(messagesEn.includes(`"${key}":`), `en missing ${key}`);
+    assert.ok(messagesZh.includes(`"${key}":`), `zh-CN missing ${key}`);
+  }
+});
+
 test("AppShell owns the token-speed preference like completion sound", () => {
   assert.match(shell, /useTokenSpeedPreference/);
   assert.match(shell, /tokenSpeedEnabled=\{tokenSpeedEnabled\}/);
