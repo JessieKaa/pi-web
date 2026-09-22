@@ -214,3 +214,12 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 --accent --user-bg --tool-bg
 --font-mono
 ```
+
+---
+
+## Subagent and Worktree Preferences
+
+- For work that has independently implementable parts, identify the parallelizable slices and use isolated git worktrees to delegate them to subagents. Run up to 10 worktree-backed subagents concurrently when the task benefits from that level of parallelism.
+- Start implementation and review subagents with model `ccswitch/claude-opus-4-8` and thinking level `high`.
+- Assign code review to a subagent separate from the implementation subagent whenever practical.
+- The primary agent retains approval, integration, conflict resolution, final merges, and other coordination work.
