@@ -720,6 +720,55 @@ export function buildSessionContext(
   };
 }
 
+/**
+ * Builds the browser transcript for one in-session branch. This deliberately
+ * follows parentId all the way to the root: Pi's SDK context builder begins at
+ * the latest compaction and is correct for the model, while the transcript must
+ * retain the messages summarized by that compaction for human browsing.
+ *
+ * SessionHeader.parentSession links independent fork files and is intentionally
+ * outside this traversal.
+ */
+export function buildSessionTranscript(
+  entries: SessionEntry[],
+  leafId?: string | null,
+  options: { deferThinking?: boolean; deferToolResultImages?: boolean; deferToolResults?: boolean } = {},
+): SessionContext {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const selectedLeafId = leafId === undefined ? entries.at(-1)?.id ?? null : leafId;
+  if (!selectedLeafId || !byId.has(selectedLeafId)) return EMPTY_CONTEXT;
+
+  const path: SessionEntry[] = [];
+  const visited = new Set<string>();
+  let current = byId.get(selectedLeafId);
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    path.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  path.reverse();
+
+  const messages: AgentMessage[] = [];
+  const entryIds: string[] = [];
+  for (const entry of path) {
+    const message = entryToUiMessage(entry, options);
+    if (!message) continue;
+    messages.push(message);
+    entryIds.push(entry.id);
+  }
+
+  // Reuse Pi's metadata resolution without adopting its compaction-filtered
+  // message list. Model, thinking and goal state still describe this leaf.
+  const contextMetadata = buildSessionContext(entries, selectedLeafId, options);
+  return {
+    messages,
+    entryIds,
+    thinkingLevel: contextMetadata.thinkingLevel,
+    model: contextMetadata.model,
+    goal: contextMetadata.goal,
+  };
+}
+
 function parseEntryTimestamp(timestamp: string): number | undefined {
   const parsed = Date.parse(timestamp);
   return Number.isNaN(parsed) ? undefined : parsed;
@@ -862,6 +911,11 @@ export type SessionWindow = {
   totalActiveMs: number;
 };
 
+export type SessionTranscriptWindow = SessionWindow & {
+  /** A before cursor stopped being part of the selected raw parent chain. */
+  historyChanged?: boolean;
+};
+
 function nextLineStart(filePath: string, pos: number, limit: number): number {
   if (pos <= 0) return 0;
   const fd = openSync(filePath, "r");
@@ -987,6 +1041,56 @@ function windowFromEntries(
 const WINDOW_ENTRY_CACHE_LIMIT = 4;
 const windowEntryCache = new Map<string, { mtimeMs: number; byId: Map<string, SessionEntry> }>();
 
+// Transcript reads need the whole parent graph; cache a small number of direct
+// JSONL snapshots so repeated top-of-history pagination does not reopen and
+// parse multi-megabyte tool results. This cache is read-only and revision-bound.
+const TRANSCRIPT_ENTRY_CACHE_LIMIT = 2;
+const TRANSCRIPT_ENTRY_CACHE_MAX_FILE_BYTES = 16 * 1024 * 1024;
+const transcriptEntryCache = new Map<string, {
+  revision: string;
+  entries: SessionEntry[];
+}>();
+
+function fileRevision(st: Stats): string {
+  return `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
+}
+
+function rememberTranscriptEntries(filePath: string, revision: string, entries: SessionEntry[], fileSize: number) {
+  if (transcriptEntryCache.has(filePath)) transcriptEntryCache.delete(filePath);
+  // The cache only removes repeat parsing for typical sessions. Very large
+  // transcripts remain read-through so two session pages cannot retain an
+  // unbounded amount of tool output in the server process.
+  if (fileSize > TRANSCRIPT_ENTRY_CACHE_MAX_FILE_BYTES) return;
+  transcriptEntryCache.set(filePath, { revision, entries });
+  while (transcriptEntryCache.size > TRANSCRIPT_ENTRY_CACHE_LIMIT) {
+    const oldest = transcriptEntryCache.keys().next().value;
+    if (oldest === undefined) break;
+    transcriptEntryCache.delete(oldest);
+  }
+}
+
+function readTranscriptEntries(filePath: string): SessionEntry[] {
+  let before = statSync(filePath);
+  let revision = fileRevision(before);
+  const cached = transcriptEntryCache.get(filePath);
+  if (cached?.revision === revision) return cached.entries;
+
+  // A compact/migration can rewrite a session while it is being read. Retry
+  // once against the new revision so callers never combine two file versions.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const entries = parseJsonlRange(filePath, 0, before.size);
+    const after = statSync(filePath);
+    const afterRevision = fileRevision(after);
+    if (afterRevision === revision || attempt === 1) {
+      rememberTranscriptEntries(filePath, afterRevision, entries, after.size);
+      return entries;
+    }
+    before = after;
+    revision = afterRevision;
+  }
+  return [];
+}
+
 function rememberWindowEntries(filePath: string, mtimeMs: number, entries: SessionEntry[]) {
   const byId = new Map<string, SessionEntry>();
   for (const entry of entries) byId.set(entry.id, entry);
@@ -1067,6 +1171,43 @@ export function readSessionWindow(
     }
     entries = parseJsonlRange(filePath, start, prev).concat(entries);
   }
+}
+
+export function readSessionTranscriptWindow(
+  filePath: string,
+  options: {
+    limit?: number;
+    before?: string;
+    leafId?: string | null;
+    deferThinking?: boolean;
+    deferToolResultImages?: boolean;
+    deferToolResults?: boolean;
+  } = {},
+): SessionTranscriptWindow {
+  const entries = readTranscriptEntries(filePath);
+  const leafId = options.leafId === undefined ? entries.at(-1)?.id ?? null : options.leafId;
+  const full = buildSessionTranscript(entries, leafId, options);
+  if (options.before && !full.entryIds.includes(options.before)) {
+    return {
+      context: EMPTY_CONTEXT,
+      hasMore: false,
+      leafId,
+      tree: treeFromEntries(entries),
+      totalActiveMs: computeSessionTotalActiveMs(entries),
+      historyChanged: true,
+    };
+  }
+  const { context, hasMore } = sliceSessionContext(full, {
+    limit: options.limit ?? SESSION_MESSAGE_WINDOW,
+    before: options.before,
+  });
+  return {
+    context,
+    hasMore,
+    leafId,
+    tree: treeFromEntries(entries),
+    totalActiveMs: computeSessionTotalActiveMs(entries),
+  };
 }
 
 export function findSessionEntry(filePath: string, entryId: string): SessionEntry | undefined {

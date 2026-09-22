@@ -192,8 +192,12 @@ test("context usage refreshes from assistant completions and live agent state", 
   assert.match(source, /loadedSessionIdRef/);
   assert.match(source, /\[session\?\.id\]/);
   assert.match(source, /from "@\/lib\/conversation-context"/);
+  assert.match(loadSource, /history: "transcript"/);
+  assert.equal((source.match(/history: "transcript"/g) ?? []).length, 3);
   assert.match(loadSource, /limit: String\(SESSION_MESSAGE_WINDOW\)/);
   assert.match(source, /const loadOlderHistory = useCallback/);
+  assert.match(source, /res\.status === 409/);
+  assert.match(source, /void loadSession\(sid\)/);
   assert.match(source, /activeLeafIdRef\.current/);
   assert.match(source, /\/api\/sessions\/\$\{encodeURIComponent\(sid\)\}\/context\?/);
   assert.match(source, /mergeWindowedHistory/);

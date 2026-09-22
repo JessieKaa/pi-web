@@ -9,8 +9,10 @@ import {
   listAllSessions,
   mergeSessionLists,
   buildSessionContext,
+  buildSessionTranscript,
   readCachedSessionInfo,
   readSessionHeader,
+  readSessionTranscriptWindow,
   readSessionWindow,
 } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/paths";
@@ -83,11 +85,17 @@ export async function GET(
     const deferToolResultImages = searchParams.has("deferMedia");
     const deferToolResults = searchParams.has("deferToolResults");
     const { limit, before, leafId: leafIdParam } = parseSessionWindowParams(searchParams);
+    const historyMode = searchParams.get("history") === "transcript" ? "transcript" : "context";
     const defer = { deferThinking, deferToolResultImages, deferToolResults };
 
     if (!liveRpc) {
       const filePath = resolvedPath!;
-      const window = readSessionWindow(filePath, { limit, before, leafId: leafIdParam, ...defer });
+      const window = historyMode === "transcript"
+        ? readSessionTranscriptWindow(filePath, { limit, before, leafId: leafIdParam, ...defer })
+        : readSessionWindow(filePath, { limit, before, leafId: leafIdParam, ...defer });
+      if ("historyChanged" in window && window.historyChanged) {
+        return Response.json({ error: "Transcript changed; reload history", code: "history_changed" }, { status: 409 });
+      }
       const header = readSessionHeader(filePath);
       const listInfo = readCachedSessionInfo(filePath);
       let modified = header?.timestamp ?? new Date().toISOString();
@@ -118,6 +126,7 @@ export async function GET(
         context: window.context,
         totalActiveMs: window.totalActiveMs,
         hasMore: window.hasMore,
+        historyMode,
       });
     }
 
@@ -125,7 +134,12 @@ export async function GET(
     const filePath = liveRpc.sessionFile || sm.getSessionFile() || "";
     const entries = sm.getEntries();
     const leafId = leafIdParam || sm.getLeafId();
-    const full = buildSessionContext(entries as never, leafId, defer);
+    const full = historyMode === "transcript"
+      ? buildSessionTranscript(entries as never, leafId, defer)
+      : buildSessionContext(entries as never, leafId, defer);
+    if (historyMode === "transcript" && before && !full.entryIds.includes(before)) {
+      return Response.json({ error: "Transcript changed; reload history", code: "history_changed" }, { status: 409 });
+    }
     const { context, hasMore } = sliceSessionContext(full, { limit, before });
     const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();
@@ -161,6 +175,7 @@ export async function GET(
       context,
       totalActiveMs: computeSessionTotalActiveMs(entries),
       hasMore,
+      historyMode,
     });
   } catch (error) {
     return Response.json({ error: String(error) }, { status: 500 });

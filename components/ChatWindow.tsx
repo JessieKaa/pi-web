@@ -369,7 +369,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   }, [chatInputRef]);
 
   const {
-    data, loading, error, messages, entryIds, historyHasMore, streamState,
+    data, loading, error, messages, entryIds, historyHasMore, loadingOlderHistory, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats,
@@ -459,7 +459,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   // Only render the last N messages initially. When the user scrolls to the
   // top, load another page while keeping the scroll position stable.
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLButtonElement>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
   const sentinelArmedRef = useRef(true);
 
@@ -1310,9 +1310,28 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               return (
                 <>
                   {showSentinel && (
-                     <div ref={sentinelRef} className="py-3 text-center text-xs text-text-muted">
-                       {t("chat.loadEarlier", { count: hasMore ? startIndex : SESSION_MESSAGE_WINDOW })}
-                    </div>
+                    <button
+                      ref={sentinelRef}
+                      type="button"
+                      className="block w-full py-3 text-center text-xs text-text-muted hover:text-text disabled:cursor-wait disabled:opacity-60"
+                      disabled={loadingOlderHistory && !hasMore}
+                      aria-busy={loadingOlderHistory && !hasMore}
+                      onClick={() => {
+                        const container = scrollContainerRef.current;
+                        if (container) {
+                          prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
+                        }
+                        if (hasMore) {
+                          setVisibleCount((previous) => getNextVisibleCount(previous));
+                          return;
+                        }
+                        void loadOlderHistory().then((added) => {
+                          if (added > 0) setVisibleCount((previous) => previous + added);
+                        });
+                      }}
+                    >
+                      {t("chat.loadEarlier", { count: hasMore ? startIndex : SESSION_MESSAGE_WINDOW })}
+                    </button>
                   )}
                   {rendered.slice(startIndex)}
                 </>

@@ -16,6 +16,7 @@ const jiti = createJiti(import.meta.url, {
   moduleCache: false,
 });
 const { GET: getSessionDetail, DELETE: deleteSession } = await jiti.import("./[id]/route.ts");
+const { GET: getSessionContext } = await jiti.import("./[id]/context/route.ts");
 const { GET: getSessionState } = await jiti.import("./[id]/state/route.ts");
 const { cacheSessionPath } = await jiti.import("../../../lib/session-reader.ts");
 
@@ -472,4 +473,28 @@ test("idle session detail windows messages and pages with before", async (t) => 
     { params: Promise.resolve({ id: `${id}-side` }) },
   )).json();
   assert.deepEqual(branched.context.messages.map((message) => message.content), ["root", "side branch"]);
+});
+
+test("transcript mode exposes pre-compaction messages while default context stays compacted", async (t) => {
+  const previousRegistry = globalThis.__piSessions;
+  const dir = mkdtempSync(join(tmpdir(), "pi-web-transcript-route-"));
+  const id = "transcript-route-test";
+  const path = join(dir, `${id}.jsonl`);
+  const entries = [
+    { type: "session", version: 3, id, timestamp: "2026-08-14T00:00:00.000Z", cwd: dir },
+    { type: "message", id: "u1", parentId: null, timestamp: "2026-08-14T00:00:01.000Z", message: { role: "user", content: "old" } },
+    { type: "message", id: "u2", parentId: "u1", timestamp: "2026-08-14T00:00:02.000Z", message: { role: "user", content: "kept" } },
+    { type: "compaction", id: "cmp", parentId: "u2", timestamp: "2026-08-14T00:00:03.000Z", summary: "summary", firstKeptEntryId: "u2", tokensBefore: 20 },
+    { type: "message", id: "u3", parentId: "cmp", timestamp: "2026-08-14T00:00:04.000Z", message: { role: "user", content: "new" } },
+  ];
+  writeFileSync(path, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  cacheSessionPath(id, path);
+  globalThis.__piSessions = new Map();
+  t.after(() => { globalThis.__piSessions = previousRegistry; });
+
+  const routeContext = { params: Promise.resolve({ id }) };
+  const context = await (await getSessionDetail(new Request(`http://localhost/api/sessions/${id}?limit=10`), routeContext)).json();
+  const transcript = await (await getSessionContext(new Request(`http://localhost/api/sessions/${id}/context?history=transcript&limit=10`), routeContext)).json();
+  assert.deepEqual(context.context.entryIds, ["cmp", "u2", "u3"]);
+  assert.deepEqual(transcript.context.entryIds, ["u1", "u2", "cmp", "u3"]);
 });

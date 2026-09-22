@@ -302,6 +302,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [entryIds, setEntryIds] = useState<string[]>([]);
   const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [loadingOlderHistory, setLoadingOlderHistory] = useState(false);
   const [streamState, rawDispatch] = useReducer(streamReducer, INITIAL_STREAMING_STATE);
   const streamStateRef = useRef(INITIAL_STREAMING_STATE);
   const dispatch = useCallback((action: StreamAction) => {
@@ -547,6 +548,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         deferThinking: "1",
         deferMedia: "1",
         deferToolResults: "1",
+        history: "transcript",
         limit: String(SESSION_MESSAGE_WINDOW),
       });
       if (activeLeafIdRef.current) params.set("leafId", activeLeafIdRef.current);
@@ -648,6 +650,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         deferThinking: "1",
         deferMedia: "1",
         deferToolResults: "1",
+        history: "transcript",
         limit: String(SESSION_MESSAGE_WINDOW),
       });
       if (leafId) params.set("leafId", leafId);
@@ -668,16 +671,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const before = entryIdsRef.current[0];
     if (!sid || !before || !historyHasMoreRef.current || loadingOlderRef.current) return 0;
     loadingOlderRef.current = true;
+    setLoadingOlderHistory(true);
     try {
       const params = new URLSearchParams({
         deferThinking: "1",
         deferMedia: "1",
         deferToolResults: "1",
+        history: "transcript",
         limit: String(SESSION_MESSAGE_WINDOW),
         before,
       });
       if (activeLeafIdRef.current) params.set("leafId", activeLeafIdRef.current);
       const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/context?${params}`);
+      if (res.status === 409) {
+        // A compact/migration can rewrite a JSONL while an older page is in
+        // flight. Drop stale paged rows before rebuilding the selected path.
+        replaceMessages([]);
+        setEntryIds([]);
+        setHistoryHasMore(false);
+        void loadSession(sid);
+        return 0;
+      }
       if (!res.ok) return 0;
       const d = await res.json() as SessionData;
       if (sessionIdRef.current !== sid || entryIdsRef.current[0] !== before) return 0;
@@ -696,8 +710,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       return 0;
     } finally {
       loadingOlderRef.current = false;
+      setLoadingOlderHistory(false);
     }
-  }, []);
+  }, [loadSession, replaceMessages]);
 
   const loadTools = useCallback(async (sid: string) => {
     try {
@@ -2353,7 +2368,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   return {
     // State
-    data, loading, error, activeLeafId, messages, entryIds, historyHasMore, streamState,
+    data, loading, error, activeLeafId, messages, entryIds, historyHasMore, loadingOlderHistory, streamState,
     agentRunning, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats,
