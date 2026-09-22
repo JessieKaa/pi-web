@@ -633,9 +633,12 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     return () => observer.disconnect();
   }, [visibleCount, messages.length, historyHasMore, loadOlderHistory, scrollContainerRef]);
 
-  // After visibleCount increases (more messages prepended), restore the
-  // scroll position so the viewport doesn't jump.
-  useEffect(() => {
+  // After visibleCount increases (older messages prepended), restore the
+  // scroll position in the same commit, before the browser paints, so the
+  // prepended history can never shift the viewport (no CLS). This must stay
+  // synchronous: a passive effect or requestAnimationFrame would let one
+  // frame paint at the top of the newly grown transcript.
+  useLayoutEffect(() => {
     if (prevScrollDistanceRef.current == null) return;
     const container = scrollContainerRef.current;
     if (!container) return;

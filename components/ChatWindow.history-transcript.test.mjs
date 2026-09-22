@@ -55,3 +55,43 @@ test("only grows or trims message refs when the historical visible count changes
   assert.match(source, /else if \(refs\.current\.length > count\) \{\s*refs\.current\.length = count;/s);
   assert.doesNotMatch(source, /refs\.current = Array\(count\)/);
 });
+
+test("restores prepended history scroll synchronously before the browser paints", () => {
+  const restoreIndex = source.indexOf(
+    "container.scrollTop = restoreScrollTop(container.scrollHeight, prevScrollDistanceRef.current)",
+  );
+  assert.notEqual(restoreIndex, -1, "the preload scroll restore must stay in ChatWindow");
+
+  // Regression: a passive effect runs after paint, so the browser can paint the
+  // prepended history at the old scrollTop and produce a visible CLS jump.
+  const layoutIndex = source.lastIndexOf("useLayoutEffect", restoreIndex);
+  const passiveIndex = source.lastIndexOf("useEffect", restoreIndex);
+  assert.ok(layoutIndex !== -1, "preload scroll restore must use useLayoutEffect");
+  assert.ok(
+    layoutIndex > passiveIndex,
+    "preload scroll restore must be the nearest hook before the assignment, i.e. useLayoutEffect",
+  );
+
+  const depsEnd = source.indexOf("}, [visibleCount, scrollContainerRef])", restoreIndex);
+  assert.ok(depsEnd > restoreIndex, "restore effect must still be keyed on visibleCount");
+  const restoreEffect = source.slice(layoutIndex, depsEnd);
+
+  // Keep the distance-preserving algorithm, the null guard, and the ref reset.
+  assert.match(restoreEffect, /if \(prevScrollDistanceRef\.current == null\) return;/);
+  assert.match(restoreEffect, /const container = scrollContainerRef\.current;/);
+  assert.match(
+    restoreEffect,
+    /container\.scrollTop = restoreScrollTop\(container\.scrollHeight, prevScrollDistanceRef\.current\);/,
+  );
+  assert.match(restoreEffect, /prevScrollDistanceRef\.current = null;/);
+  // No deferred frame may reintroduce a post-paint jump.
+  assert.doesNotMatch(restoreEffect, /requestAnimationFrame/);
+});
+
+test("captures the scroll distance before every prepend trigger", () => {
+  const captures = source.match(
+    /prevScrollDistanceRef\.current = captureScrollDistance\(container\.scrollHeight, container\.scrollTop\)/g,
+  ) ?? [];
+  // Both the IntersectionObserver and the explicit sentinel click capture first.
+  assert.ok(captures.length >= 2, `expected at least 2 capture sites, found ${captures.length}`);
+});
