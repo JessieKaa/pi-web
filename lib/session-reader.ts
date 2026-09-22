@@ -842,6 +842,9 @@ function entryToUiMessage(
         details: entry.details,
         timestamp: parseEntryTimestamp(entry.timestamp),
       };
+    case "context_edit":
+    case "usage":
+      return null;
     default:
       return null;
   }

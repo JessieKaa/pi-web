@@ -125,6 +125,8 @@ test("cache warming is a pi setting owned by the general section", () => {
   assert.match(settings, /fetch\(`\/api\/cache-warming\$\{query\}`\)/);
   assert.match(settings, /body: JSON\.stringify\(\{ mode, cwd: cwd \?\? undefined \}\)/);
   assert.match(settings, /aria-checked=\{cacheWarmingMode === mode\}/);
+  assert.match(settings, /fetch\(`\/api\/image-resize\$\{query\}`\)/);
+  assert.match(settings, /aria-checked=\{imageAutoResize === true\}/);
   assert.match(settings, /CACHE_WARMING_OPTIONS: CacheWarmingMode\[\] = \["off", "streaming", "idle"\]/);
 });
 

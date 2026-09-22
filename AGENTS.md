@@ -200,7 +200,11 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 {"type":"message","id":"<8hex>","parentId":"<8hex>","message":{"role":"toolResult","toolCallId":"...","content":[...]}}
 {"type":"compaction","id":"<8hex>","parentId":"<8hex>","summary":"...","firstKeptEntryId":"<8hex>","tokensBefore":N}
 {"type":"session_info","id":"...","parentId":"...","name":"user-defined name"}
+{"type":"context_edit","id":"<8hex>","parentId":"<8hex>","targetId":"<8hex>","replacement":null}
+{"type":"usage","id":"<8hex>","parentId":"<8hex>","kind":"cache_warm","provider":"...","model":"...","usage":{}}
 ```
+
+Pi 0.87 `context_edit` changes model context only (`replacement: null` omits the target; an object replaces its content). `usage` records side-channel cost such as cache warming. Neither is a chat message: `entryToUiMessage` drops both and the original entry stays in the transcript.
 
 `entryIds[]` in `SessionContext` is a parallel array to `messages[]` — maps each displayed message back to its `.jsonl` entry id, used for fork and navigate_tree calls.
 

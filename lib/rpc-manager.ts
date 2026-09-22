@@ -1855,6 +1855,27 @@ export function applyRpcCacheWarmingMode(mode: CacheWarmingMode, cwd?: string): 
   return applied;
 }
 
+/** Pi 0.87 image auto-resize. `cwd` only selects project-level setting overrides. */
+export function getRpcImageAutoResize(cwd?: string): boolean {
+  const registry = globalThis.__piSessions;
+  for (const wrapper of registry?.values() ?? []) {
+    if (wrapper.isAlive()) return wrapper.inner.settingsManager.getImageAutoResize();
+  }
+  return SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).getImageAutoResize();
+}
+
+/** Persist the toggle and update every live session's in-memory copy. */
+export function applyRpcImageAutoResize(enabled: boolean, cwd?: string): number {
+  let applied = 0;
+  for (const wrapper of getRegistry().values()) {
+    if (!wrapper.isAlive()) continue;
+    wrapper.inner.settingsManager.setImageAutoResize(enabled);
+    applied += 1;
+  }
+  if (applied === 0) SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).setImageAutoResize(enabled);
+  return applied;
+}
+
 export async function refreshRpcSessionModelConfigs(): Promise<number> {
   const registry = globalThis.__piSessions;
   if (!registry) return 0;

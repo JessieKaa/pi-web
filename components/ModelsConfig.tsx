@@ -27,16 +27,18 @@ import {
   modelsSelectionLabel,
   resolveModelsSelection,
 } from "./models-config/models-config-navigation";
-import type {
-  ApiKeyProvider,
-  ModelEntry,
-  ModelsAccountItem,
-  ModelsCustomProviderItem,
-  ModelsDraftController,
-  ModelsJson,
-  OAuthProvider,
-  ProviderEntry,
-  Selection,
+import {
+  withImageResize,
+  type ApiKeyProvider,
+  type ImageResizeKey,
+  type ModelEntry,
+  type ModelsAccountItem,
+  type ModelsCustomProviderItem,
+  type ModelsDraftController,
+  type ModelsJson,
+  type OAuthProvider,
+  type ProviderEntry,
+  type Selection,
 } from "./models-config/models-config-types";
 
 // ── Component-local state types ────────────────────────────────────────────────
@@ -963,6 +965,9 @@ function ModelDetail({
     Object.keys(model.thinkingLevelMap ?? {}).length
       ? t("models.thinkingSummary", { count: Object.keys(model.thinkingLevelMap ?? {}).length })
       : null,
+    Object.keys(model.inputLimits?.images?.resize ?? {}).length
+      ? t("models.imageResizeSummary", { count: Object.keys(model.inputLimits?.images?.resize ?? {}).length })
+      : null,
   ].filter((part): part is string => Boolean(part));
   const advancedSummary = advancedSummaryParts.length
     ? advancedSummaryParts.join(" · ")
@@ -1184,6 +1189,28 @@ function ModelDetail({
                 {t("models.headersHelp")}
               </span>
             </Field>
+
+            <div>
+              <SectionTitle>{t("models.imageResize")}</SectionTitle>
+              <span style={{ display: "block", margin: "4px 0 8px", fontSize: "var(--text-meta)", color: "var(--text-dim)" }}>
+                {t("models.imageResizeHelp")}
+              </span>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+                {([
+                  ["maxWidth", "models.imageMaxWidth"],
+                  ["maxHeight", "models.imageMaxHeight"],
+                  ["maxBytes", "models.imageMaxBytes"],
+                  ["jpegQuality", "models.imageJpegQuality"],
+                ] as const).map(([key, label]) => (
+                  <Field key={key} label={t(label)}>
+                    <NumInput
+                      value={model.inputLimits?.images?.resize?.[key] !== undefined ? String(model.inputLimits.images.resize[key]) : ""}
+                      onChange={(value) => onChange(withImageResize(model, key as ImageResizeKey, value))}
+                    />
+                  </Field>
+                ))}
+              </div>
+            </div>
 
             {model.reasoning && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

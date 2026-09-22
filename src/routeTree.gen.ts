@@ -15,6 +15,7 @@ import { Route as ApiCacheWarmingRouteImport } from './routes/api/cache-warming'
 import { Route as ApiDefaultCwdRouteImport } from './routes/api/default-cwd'
 import { Route as ApiFileIndexRouteImport } from './routes/api/file-index'
 import { Route as ApiHomeRouteImport } from './routes/api/home'
+import { Route as ApiImageResizeRouteImport } from './routes/api/image-resize'
 import { Route as ApiModelsRouteImport } from './routes/api/models'
 import { Route as ApiModelsConfigRouteImport } from './routes/api/models-config'
 import { Route as ApiPluginsRouteImport } from './routes/api/plugins'
@@ -87,6 +88,11 @@ const ApiFileIndexRoute = ApiFileIndexRouteImport.update({
 const ApiHomeRoute = ApiHomeRouteImport.update({
   id: '/api/home',
   path: '/api/home',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiImageResizeRoute = ApiImageResizeRouteImport.update({
+  id: '/api/image-resize',
+  path: '/api/image-resize',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiModelsRoute = ApiModelsRouteImport.update({
@@ -315,6 +321,7 @@ export interface FileRoutesByFullPath {
   '/api/default-cwd': typeof ApiDefaultCwdRoute
   '/api/file-index': typeof ApiFileIndexRoute
   '/api/home': typeof ApiHomeRoute
+  '/api/image-resize': typeof ApiImageResizeRoute
   '/api/models': typeof ApiModelsRoute
   '/api/models-config': typeof ApiModelsConfigRouteWithChildren
   '/api/plugins': typeof ApiPluginsRoute
@@ -366,6 +373,7 @@ export interface FileRoutesByTo {
   '/api/default-cwd': typeof ApiDefaultCwdRoute
   '/api/file-index': typeof ApiFileIndexRoute
   '/api/home': typeof ApiHomeRoute
+  '/api/image-resize': typeof ApiImageResizeRoute
   '/api/models': typeof ApiModelsRoute
   '/api/models-config': typeof ApiModelsConfigRouteWithChildren
   '/api/plugins': typeof ApiPluginsRoute
@@ -418,6 +426,7 @@ export interface FileRoutesById {
   '/api/default-cwd': typeof ApiDefaultCwdRoute
   '/api/file-index': typeof ApiFileIndexRoute
   '/api/home': typeof ApiHomeRoute
+  '/api/image-resize': typeof ApiImageResizeRoute
   '/api/models': typeof ApiModelsRoute
   '/api/models-config': typeof ApiModelsConfigRouteWithChildren
   '/api/plugins': typeof ApiPluginsRoute
@@ -471,6 +480,7 @@ export interface FileRouteTypes {
     | '/api/default-cwd'
     | '/api/file-index'
     | '/api/home'
+    | '/api/image-resize'
     | '/api/models'
     | '/api/models-config'
     | '/api/plugins'
@@ -522,6 +532,7 @@ export interface FileRouteTypes {
     | '/api/default-cwd'
     | '/api/file-index'
     | '/api/home'
+    | '/api/image-resize'
     | '/api/models'
     | '/api/models-config'
     | '/api/plugins'
@@ -573,6 +584,7 @@ export interface FileRouteTypes {
     | '/api/default-cwd'
     | '/api/file-index'
     | '/api/home'
+    | '/api/image-resize'
     | '/api/models'
     | '/api/models-config'
     | '/api/plugins'
@@ -625,6 +637,7 @@ export interface RootRouteChildren {
   ApiDefaultCwdRoute: typeof ApiDefaultCwdRoute
   ApiFileIndexRoute: typeof ApiFileIndexRoute
   ApiHomeRoute: typeof ApiHomeRoute
+  ApiImageResizeRoute: typeof ApiImageResizeRoute
   ApiModelsRoute: typeof ApiModelsRoute
   ApiModelsConfigRoute: typeof ApiModelsConfigRouteWithChildren
   ApiPluginsRoute: typeof ApiPluginsRoute
@@ -694,6 +707,13 @@ declare module '@tanstack/react-router' {
       path: '/api/home'
       fullPath: '/api/home'
       preLoaderRoute: typeof ApiHomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/image-resize': {
+      id: '/api/image-resize'
+      path: '/api/image-resize'
+      fullPath: '/api/image-resize'
+      preLoaderRoute: typeof ApiImageResizeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/models': {
@@ -1105,6 +1125,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiDefaultCwdRoute: ApiDefaultCwdRoute,
   ApiFileIndexRoute: ApiFileIndexRoute,
   ApiHomeRoute: ApiHomeRoute,
+  ApiImageResizeRoute: ApiImageResizeRoute,
   ApiModelsRoute: ApiModelsRoute,
   ApiModelsConfigRoute: ApiModelsConfigRouteWithChildren,
   ApiPluginsRoute: ApiPluginsRoute,

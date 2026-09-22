@@ -21,6 +21,13 @@ export interface ApiKeyProvider {
   supportsOAuth?: boolean;
 }
 
+export interface ModelImageResize {
+  maxWidth?: number;
+  maxHeight?: number;
+  maxBytes?: number;
+  jpegQuality?: number;
+}
+
 export interface ModelEntry {
   id: string;
   name?: string;
@@ -28,11 +35,40 @@ export interface ModelEntry {
   reasoning?: boolean;
   thinkingLevelMap?: Record<string, string | null>;
   input?: string[];
+  inputLimits?: {
+    maxRequestBytes?: number;
+    images?: {
+      resize?: ModelImageResize;
+      maxPerMessage?: number;
+      maxPerRequest?: number;
+    };
+  };
   contextWindow?: number;
   maxTokens?: number;
   cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: unknown };
   headers?: Record<string, string>;
   compat?: Record<string, unknown>;
+}
+
+const IMAGE_RESIZE_KEYS = ["maxWidth", "maxHeight", "maxBytes", "jpegQuality"] as const;
+export type ImageResizeKey = (typeof IMAGE_RESIZE_KEYS)[number];
+
+/** Set one cache-safe resize field. Blank or invalid input drops that field and empty parents. */
+export function withImageResize(model: ModelEntry, key: ImageResizeKey, raw: string): ModelEntry {
+  const resize: ModelImageResize = { ...(model.inputLimits?.images?.resize ?? {}) };
+  if (!raw.trim()) delete resize[key];
+  else {
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 0) return model;
+    resize[key] = value;
+  }
+  const images = { ...(model.inputLimits?.images ?? {}) };
+  if (Object.keys(resize).length) images.resize = resize;
+  else delete images.resize;
+  const inputLimits = { ...(model.inputLimits ?? {}) };
+  if (Object.keys(images).length) inputLimits.images = images;
+  else delete inputLimits.images;
+  return { ...model, inputLimits: Object.keys(inputLimits).length ? inputLimits : undefined };
 }
 
 export interface ProviderEntry {

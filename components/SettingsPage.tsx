@@ -11,6 +11,7 @@ import {
   Cpu,
   Gauge,
   GlobeLock,
+  Image,
   Info,
   Languages,
   Layers3,
@@ -130,6 +131,7 @@ export function SettingsPage({
   const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [cacheWarmingMode, setCacheWarmingMode] = useState<CacheWarmingMode | null>(null);
+  const [imageAutoResize, setImageAutoResize] = useState<boolean | null>(null);
 
   useEffect(() => {
     setThinkingExpanded(isThinkingExpandedByDefault());
@@ -150,6 +152,20 @@ export function SettingsPage({
     };
   }, [cwd]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
+    fetch(`/api/image-resize${query}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { enabled?: boolean } | null) => {
+        if (!cancelled && typeof data?.enabled === "boolean") setImageAutoResize(data.enabled);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [cwd]);
+
   const handleCacheWarmingChange = useCallback((mode: CacheWarmingMode) => {
     setCacheWarmingMode(mode);
     // The route also applies the mode to live sessions, so no restart is needed.
@@ -159,6 +175,17 @@ export function SettingsPage({
       body: JSON.stringify({ mode, cwd: cwd ?? undefined }),
     }).catch(() => {});
   }, [cwd]);
+
+  const handleImageAutoResizeChange = useCallback(() => {
+    if (imageAutoResize === null) return;
+    const enabled = !imageAutoResize;
+    setImageAutoResize(enabled);
+    fetch("/api/image-resize", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled, cwd: cwd ?? undefined }),
+    }).catch(() => {});
+  }, [cwd, imageAutoResize]);
 
   const close = useCallback(() => {
     onModelsChanged();
@@ -359,6 +386,12 @@ export function SettingsPage({
               </button>
             ))}
           </div>
+        </section>
+        <section className="settings-form-section">
+          <div className="settings-form-label"><Image size={16} aria-hidden="true" /><div><strong>{t("settings.imageAutoResize")}</strong><span>{t("settings.imageAutoResizeDescription")}</span></div></div>
+          <button className="settings-switch" type="button" role="switch" aria-checked={imageAutoResize === true} onClick={handleImageAutoResizeChange} title={t("settings.imageAutoResize")}>
+            <span /><Image size={15} aria-hidden="true" />
+          </button>
         </section>
         <section className="settings-form-section">
           <div className="settings-form-label"><MessageSquare size={16} aria-hidden="true" /><div><strong>{t("settings.chat")}</strong><span>{t("settings.quoteSelection")}</span></div></div>
