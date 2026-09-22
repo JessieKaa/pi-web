@@ -1459,7 +1459,13 @@ function CompactionFileList({ title, files }: { title: string; files: string[] }
 function CustomMessageView({ message, cwd, onOpenFile, sessionId }: { message: CustomMessage; cwd?: string; onOpenFile?: (filePath: string) => void; sessionId?: string }) {
   const { t } = useI18n();
   const isHiddenDisplay = message.display === false;
-  const [contentExpanded, setContentExpanded] = useState(!isHiddenDisplay);
+  // A completed subagent can return a full report (often many paragraphs). Keep
+  // the notification visible, but fold that report by default just like a
+  // display:false extension payload. This is UI-only so existing persisted
+  // notifications gain the behavior too.
+  const isSubagentNotification = message.customType === "pi-web:subagent-notification";
+  const contentCollapsedByDefault = isHiddenDisplay || isSubagentNotification;
+  const [contentExpanded, setContentExpanded] = useState(!contentCollapsedByDefault);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const text = getMessageText(message.content);
@@ -1530,6 +1536,7 @@ function CustomMessageView({ message, cwd, onOpenFile, sessionId }: { message: C
         ) : (
           <button
             onClick={() => setContentExpanded(true)}
+            aria-expanded={false}
             style={{
               display: "block",
               width: "100%",

@@ -304,6 +304,21 @@ test("renders custom-message images as buttons that open a larger preview", () =
   assert.match(html, /<img[^>]+src="data:image\/png;base64,YWJj"/);
 });
 
+test("collapses displayable subagent notifications by default", () => {
+  const html = renderMessage({
+    role: "custom",
+    customType: "pi-web:subagent-notification",
+    display: true,
+    content: `Subagent report: ${"summary ".repeat(30)}PRIVATE_REPORT_TAIL`,
+    details: { kind: "pi-web-subagent", status: "completed" },
+  });
+
+  assert.match(html, /pi-web:subagent-notification/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /Subagent report:/);
+  assert.doesNotMatch(html, /PRIVATE_REPORT_TAIL/);
+});
+
 test("completed usage line includes billed t/s when timestamps exist", () => {
   const html = renderMessage({
     role: "assistant",
