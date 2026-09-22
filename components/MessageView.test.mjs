@@ -317,6 +317,8 @@ test("collapses displayable subagent notifications by default", () => {
   assert.match(html, /aria-expanded="false"/);
   assert.match(html, /Subagent report:/);
   assert.doesNotMatch(html, /PRIVATE_REPORT_TAIL/);
+  assert.match(source, /const contentAndDetailsDisclosure = contentCollapsedByDefault/);
+  assert.match(source, /if \(contentAndDetailsDisclosure\) setContentExpanded\(\(v\) => !v\)/);
 });
 
 test("completed usage line includes billed t/s when timestamps exist", () => {

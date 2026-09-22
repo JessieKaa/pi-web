@@ -1465,6 +1465,7 @@ function CustomMessageView({ message, cwd, onOpenFile, sessionId }: { message: C
   // notifications gain the behavior too.
   const isSubagentNotification = message.customType === "pi-web:subagent-notification";
   const contentCollapsedByDefault = isHiddenDisplay || isSubagentNotification;
+  const contentAndDetailsDisclosure = contentCollapsedByDefault;
   const [contentExpanded, setContentExpanded] = useState(!contentCollapsedByDefault);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1578,10 +1579,10 @@ function CustomMessageView({ message, cwd, onOpenFile, sessionId }: { message: C
                {copied ? t("i18n.copied") : t("i18n.copy")}
             </button>
           ) : null}
-          {(hasDetails || isHiddenDisplay) && (
+          {(hasDetails || contentAndDetailsDisclosure) && (
             <button
               onClick={() => {
-                if (isHiddenDisplay) setContentExpanded((v) => !v);
+                if (contentAndDetailsDisclosure) setContentExpanded((v) => !v);
                 else setDetailsExpanded((v) => !v);
               }}
               style={{
@@ -1594,14 +1595,14 @@ function CustomMessageView({ message, cwd, onOpenFile, sessionId }: { message: C
                 fontSize: "var(--text-meta)",
               }}
             >
-              {isHiddenDisplay
+              {contentAndDetailsDisclosure
                  ? (contentExpanded ? t("i18n.collapse") : t("i18n.expand"))
                  : (detailsExpanded ? t("i18n.hideDetails") : t("i18n.showDetails"))}
             </button>
           )}
         </div>
 
-        {hasDetails && ((isHiddenDisplay && contentExpanded) || (!isHiddenDisplay && detailsExpanded)) && (
+        {hasDetails && ((contentAndDetailsDisclosure && contentExpanded) || (!contentAndDetailsDisclosure && detailsExpanded)) && (
           <pre
             style={{
               margin: 0,
