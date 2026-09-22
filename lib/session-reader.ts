@@ -858,7 +858,11 @@ function entryToUiMessage(
         ...message,
         content: message.content.map((block) => (
           block.type === "thinking" && block.thinking.trim() !== ""
-            ? { ...block, thinking: "", deferred: true }
+            // Explicit projection: browsing DTOs intentionally drop provider
+            // fields such as thinkingSignature to shrink the transcript payload.
+            // The source entry/block is never mutated, and the block ordinal is
+            // preserved because this maps the content array one-to-one.
+            ? { type: "thinking" as const, thinking: "", deferred: true }
             : block
         )),
       };
