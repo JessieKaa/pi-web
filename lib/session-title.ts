@@ -292,7 +292,18 @@ export type TitleGenerationFallbackReason =
   | "not-configured"
   | "model-not-found"
   | "model-out-of-scope"
-  | "thinking-level-unsupported";
+  | "thinking-level-unsupported"
+  | "resolution-failed";
+
+/**
+ * Route-facing metadata describing how a title request selected its model.
+ * Shared with the auto-name route so its failure reasons cannot drift from the
+ * union the resolver can actually produce.
+ */
+export interface SessionTitleGenerationMetadata {
+  usedConfiguredPreference: boolean;
+  fallbackReason?: TitleGenerationFallbackReason;
+}
 
 export interface ResolvedSessionTitleOverride {
   override?: SessionTitleModelOverride;

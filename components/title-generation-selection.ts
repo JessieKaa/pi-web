@@ -53,8 +53,8 @@ export function normalizeTitlePreference(value: unknown): TitleGenerationPrefere
     || typeof preference.provider !== "string"
     || typeof preference.modelId !== "string"
     || typeof preference.thinkingLevel !== "string"
-    || !preference.provider
-    || !preference.modelId
+    || !preference.provider.trim()
+    || !preference.modelId.trim()
     || !preference.thinkingLevel
   ) {
     return null;

@@ -102,6 +102,8 @@ test("normalizes the stored preference wrapper", () => {
   assert.equal(normalizeTitlePreference(null), null);
   assert.equal(normalizeTitlePreference({ version: 2, provider: "a", modelId: "b", thinkingLevel: "off" }), null);
   assert.equal(normalizeTitlePreference({ version: 1, provider: "", modelId: "b", thinkingLevel: "off" }), null);
+  assert.equal(normalizeTitlePreference({ version: 1, provider: "   ", modelId: "b", thinkingLevel: "off" }), null);
+  assert.equal(normalizeTitlePreference({ version: 1, provider: "a", modelId: "\t ", thinkingLevel: "off" }), null);
   assert.equal(normalizeTitlePreference({ version: 1, provider: "a", modelId: "b" }), null);
 });
 

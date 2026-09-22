@@ -42,11 +42,11 @@ export function assertTitleGenerationPreference(
       "preference must be null or { version: 1, provider, modelId, thinkingLevel }",
     );
   }
-  if (typeof value.provider !== "string") {
-    throw new Error("preference.provider must be a string");
+  if (typeof value.provider !== "string" || value.provider.trim() === "") {
+    throw new Error("preference.provider must be a non-blank string");
   }
-  if (typeof value.modelId !== "string") {
-    throw new Error("preference.modelId must be a string");
+  if (typeof value.modelId !== "string" || value.modelId.trim() === "") {
+    throw new Error("preference.modelId must be a non-blank string");
   }
   if (!THINKING_LEVEL_RANK.includes(value.thinkingLevel as RankedThinkingLevel)) {
     throw new Error(
