@@ -16,15 +16,16 @@ function getBrowserStorage(): StorageLike | null {
   }
 }
 
+/** `null` means the user has not picked a preset, so a new session keeps Pi's `defaultTools`. */
 export function getPreferredToolPreset(
   storage: StorageLike | null = getBrowserStorage(),
-): ToolPreset {
-  if (!storage) return "default";
+): ToolPreset | null {
+  if (!storage) return null;
   try {
     const value = storage.getItem(STORAGE_KEY);
-    return isToolPreset(value) ? value : "default";
+    return isToolPreset(value) ? value : null;
   } catch {
-    return "default";
+    return null;
   }
 }
 

@@ -212,3 +212,21 @@ export function selectInitialModelScope(
     scopedModels: [...scope.scopedModels],
   };
 }
+
+/** Which catalog models each pattern enables. A pattern that matches nothing maps to `[]`. */
+export async function matchModelPatterns(
+  modelRuntime: ModelRuntime,
+  patterns: readonly string[],
+  available?: readonly Model<Api>[],
+): Promise<Map<string, string[]>> {
+  const models = available ?? await modelRuntime.getAvailable();
+  const snapshotRuntime = {
+    getAvailable: async () => models,
+  } as ModelRuntime;
+  const matches = new Map<string, string[]>();
+  for (const pattern of patterns) {
+    const { scopedModels } = await resolveModelScopeWithDiagnostics([pattern], snapshotRuntime);
+    matches.set(pattern, scopedModels.map((scoped) => `${scoped.model.provider}/${scoped.model.id}`));
+  }
+  return matches;
+}

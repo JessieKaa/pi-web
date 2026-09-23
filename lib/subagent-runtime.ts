@@ -89,6 +89,8 @@ type StoredSubagentExecution = {
   cancelQueued?: () => boolean;
 };
 
+export const SUBAGENT_REPORT_PREFIX = "[subagent-notification] Background task report, not a new user instruction.\n";
+
 declare global {
   var __piSubagentRuns: Map<string, StoredSubagentExecution> | undefined;
   var __piSubagentQueue: SubagentQueue<SubagentRunInfo> | undefined;
@@ -104,6 +106,17 @@ function getSubagentRuns(): Map<string, StoredSubagentExecution> {
 function getSubagentQueue(): SubagentQueue<SubagentRunInfo> {
   if (!globalThis.__piSubagentQueue) globalThis.__piSubagentQueue = new SubagentQueue();
   return globalThis.__piSubagentQueue;
+}
+
+declare global {
+  var __piSubagentResultClaims: Set<string> | undefined;
+}
+
+function claimSubagentResult(sessionId: string): boolean {
+  if (!globalThis.__piSubagentResultClaims) globalThis.__piSubagentResultClaims = new Set();
+  if (globalThis.__piSubagentResultClaims.has(sessionId)) return false;
+  globalThis.__piSubagentResultClaims.add(sessionId);
+  return true;
 }
 
 /** A fire-and-forget steer/abort must not become a silent lost rejection. */
@@ -669,9 +682,10 @@ export function createSubagentController(
     }
     await parent.waitUntilReady();
     if (!parent.isAlive()) throw new Error(`Parent session is no longer available: ${run.parentSessionId}`);
+    if (!claimSubagentResult(run.sessionId)) return;
     await parent.inner.sendCustomMessage({
       customType: "pi-web:subagent-notification",
-      content: subagentFinalText(run),
+      content: `${SUBAGENT_REPORT_PREFIX}${subagentFinalText(run)}`,
       display: true,
       details: subagentToolDetails(run),
     }, { deliverAs: "followUp", triggerTurn: true });
@@ -691,7 +705,7 @@ export function createSubagentController(
   }
 
   return {
-    extensionRuntime: { start, resume, get, steer, notifyParent },
+    extensionRuntime: { start, resume, get, steer, notifyParent, claimResult: claimSubagentResult },
     get,
     steer,
     abort,

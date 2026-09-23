@@ -2687,6 +2687,94 @@ html.dark .settings-inline-success { color: var(--ok); }
   gap: 12px;
 }
 
+.settings-models-stack {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-models-stack .models-settings-page {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+
+.model-scope {
+  flex: 0 1 auto;
+  max-height: 42%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.model-scope-heading,
+.model-scope-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-scope-heading {
+  justify-content: space-between;
+}
+
+.model-scope-heading div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-scope-heading span,
+.model-scope-row small,
+.model-scope-list p {
+  color: var(--text-dim);
+  font-size: var(--text-meta);
+}
+
+.model-scope input[type="text"],
+.model-scope input:not([type="checkbox"]) {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--bg-panel);
+  font: inherit;
+  padding: 6px 8px;
+}
+
+.model-scope-heading button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--bg-panel);
+  padding: 6px 8px;
+}
+
+.model-scope-list {
+  min-height: 0;
+  overflow: auto;
+}
+
+.model-scope-provider {
+  border-top: 1px solid var(--border);
+}
+
+.model-scope-provider .model-scope-row:first-child {
+  font-weight: 600;
+}
+
+.model-scope-provider .model-scope-row:not(:first-child) {
+  padding-left: 22px;
+}
+
 .settings-host-editor,
 .settings-password-stack {
   width: 100%;

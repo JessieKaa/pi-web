@@ -101,7 +101,7 @@ interface Props {
   isCompacting?: boolean;
   compactError?: string | null;
   compactResult?: CompactResultInfo | null;
-  toolPreset?: ToolPreset;
+  toolPreset?: ToolPreset | null;
   onToolPresetChange?: (preset: ToolPreset) => void;
   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   onThinkingLevelChange?: (level: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
@@ -140,22 +140,24 @@ const TOOL_PRESET_MAP: Record<ToolPresetLabel, ToolPreset> = {
   default: "default",
   full: "full",
 };
-const TOOL_PRESET_LABEL_KEYS: Record<ToolPresetLabel, string> = {
+const TOOL_PRESET_LABEL_KEYS: Record<ToolPresetLabel | "configured", string> = {
   off: "chat.presetOff",
   "read-only": "chat.presetReadOnly",
   default: "chat.presetDefault",
   full: "chat.presetFull",
+  configured: "chat.presetConfigured",
 };
-const TOOL_PRESET_HINT_KEYS: Record<ToolPresetLabel, string> = {
+const TOOL_PRESET_HINT_KEYS: Record<ToolPresetLabel | "configured", string> = {
   off: "chat.presetOffHint",
   "read-only": "chat.presetReadOnlyHint",
   default: "chat.presetDefaultHint",
   full: "chat.presetFullHint",
+  configured: "chat.presetConfiguredHint",
 };
 
-function toolPresetLabelFor(preset?: ToolPreset | null): ToolPresetLabel {
-  const value = preset ?? "default";
-  return TOOL_PRESETS.find((label) => TOOL_PRESET_MAP[label] === value) ?? "default";
+function toolPresetLabelFor(preset?: ToolPreset | null): ToolPresetLabel | "configured" {
+  if (!preset) return "configured";
+  return TOOL_PRESETS.find((label) => TOOL_PRESET_MAP[label] === preset) ?? "default";
 }
 const COMPOSITION_END_ENTER_GRACE_MS = 100;
 const MODEL_FILTER_THRESHOLD = 8;
@@ -208,6 +210,7 @@ type SlashCommandSource = SlashCommandPaletteItem["source"];
 
 const BUILTIN_SLASH_COMMANDS: SlashCommandPaletteItem[] = [
   { name: "compact", description: "chat.commandCompact", source: "builtin" },
+  { name: "auto-compact", description: "chat.commandAutoCompact", source: "builtin" },
   { name: "reload", description: "chat.commandReload", source: "builtin" },
   { name: "name", description: "chat.commandName", source: "builtin" },
   { name: "session", description: "chat.commandSession", source: "builtin" },
@@ -2369,7 +2372,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             >
               <button
                 type="button"
-                className={`composer-chip${(toolPreset ?? "default") === "full" ? " is-full-access" : ""}`}
+                className={`composer-chip${toolPreset === "full" ? " is-full-access" : ""}`}
                 onClick={() => {
                   setModelDropdownOpen(false);
                   setThinkingMenuOpen(false);
@@ -2396,7 +2399,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <div className="composer-menu" style={{ left: 0, minWidth: 260 }}>
                   {TOOL_PRESETS.map((lvl) => {
                     const preset = TOOL_PRESET_MAP[lvl];
-                    const isActive = (toolPreset ?? "default") === preset;
+                    const isActive = toolPreset === preset;
                     return (
                       <button
                         key={lvl}

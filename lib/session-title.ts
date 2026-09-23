@@ -8,6 +8,8 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 const TITLE_TIMEOUT_MS = 90_000;
 const MAX_TITLE_LENGTH = 80;
+const TITLE_VISIBLE_LIMIT = 6;
+const TITLE_TEXT_CHARS = 500;
 
 const TITLE_PROMPT = `Create a concise title for this session based on the conversation above.
 
@@ -165,6 +167,61 @@ function getAssistantResult(agent: Agent, historyLength: number): GeneratedSessi
   throw new Error("The model did not return a session title");
 }
 
+function clipTitleText(value: string): string {
+  const characters = Array.from(value);
+  return characters.length <= TITLE_TEXT_CHARS ? value : characters.slice(0, TITLE_TEXT_CHARS).join("");
+}
+
+/**
+ * Keep a short tail of user, assistant, and compaction text. Tool results and
+ * tool-call payloads are what blow a 120-turn naming run out to tens of thousands of tokens.
+ */
+export function boundTitleMessages(messages: AgentMessage[]): AgentMessage[] {
+  const clipped: AgentMessage[] = [];
+  for (const message of messages) {
+    if (message.role === "toolResult") continue;
+    if (message.role === "assistant") {
+      const text = clipTitleText(message.content
+        .filter((block) => block.type === "text" && block.text.trim())
+        .map((block) => block.text.trim())
+        .join("\n"));
+      if (!text) continue;
+      clipped.push({ ...message, content: [{ type: "text", text }] });
+      continue;
+    }
+    if (message.role === "user") {
+      if (typeof message.content === "string") {
+        const text = clipTitleText(message.content);
+        if (text) clipped.push({ ...message, content: text });
+        continue;
+      }
+      const content = message.content.flatMap((block) => {
+        if (block.type !== "text") return [];
+        const text = clipTitleText(block.text);
+        return text ? [{ ...block, text }] : [];
+      });
+      if (content.length > 0) clipped.push({ ...message, content });
+      continue;
+    }
+    if (message.role === "compactionSummary") {
+      const summary = "summary" in message && typeof message.summary === "string"
+        ? clipTitleText(message.summary)
+        : "";
+      clipped.push(summary ? { ...message, summary } : message);
+    }
+  }
+
+  let visible = 0;
+  let start = clipped.length;
+  for (let index = clipped.length - 1; index >= 0; index--) {
+    start = index;
+    const role = clipped[index]?.role;
+    if (role === "user" || role === "assistant" || role === "compactionSummary") visible++;
+    if (visible >= TITLE_VISIBLE_LIMIT) break;
+  }
+  return clipped.slice(start);
+}
+
 export function sanitizeTitleMessages(messages: AgentMessage[]): AgentMessage[] {
   const sanitized: AgentMessage[] = [];
   let expectedToolResultIds: Set<string> | undefined;
@@ -212,7 +269,7 @@ export async function generateSessionTitle(source: AgentSession): Promise<Genera
   const sourceAgent = source.agent;
   await sourceAgent.waitForIdle();
 
-  const sanitizedMessages = sanitizeTitleMessages(sourceAgent.state.messages);
+  const sanitizedMessages = boundTitleMessages(sanitizeTitleMessages(sourceAgent.state.messages));
   const historyLength = sanitizedMessages.length;
   if (!sanitizedMessages.some(
     (message) => message.role === "user" || message.role === "compactionSummary",

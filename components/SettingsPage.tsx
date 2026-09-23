@@ -34,6 +34,7 @@ import { sidebarSessionTitle } from "@/lib/codex-sidebar-search";
 import type { ProjectPreference } from "@/lib/project-registry";
 import type { SessionInfo } from "@/lib/types";
 import { ModelsConfig } from "./ModelsConfig";
+import { ModelScopePanel } from "./ModelScopePanel";
 import type { ModelsDraftController } from "./models-config/models-config-types";
 import type { SettingsSectionController } from "./resource-settings/resource-settings-types";
 import { PluginsConfig } from "./PluginsConfig";
@@ -485,7 +486,12 @@ export function SettingsPage({
       </div>
     );
   } else if (section === "models") {
-    content = <ModelsConfig onControllerChange={setModelsController} />;
+    content = (
+      <div className="settings-models-stack">
+        <ModelScopePanel cwd={cwd} onChanged={onModelsChanged} />
+        <ModelsConfig onControllerChange={setModelsController} />
+      </div>
+    );
   } else if (section === "remote") {
     content = <RemoteAccessConfig onControllerChange={setRemoteController} />;
   } else if (!cwd) {

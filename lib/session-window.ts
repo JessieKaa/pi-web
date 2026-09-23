@@ -112,6 +112,19 @@ export function mergeWindowedHistory<T>(
   return { items: appendUnindexedTail(items, unindexedTail), entryIds };
 }
 
+function isVisibleWindowMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") return false;
+  const role = (message as { role?: unknown }).role;
+  return role === "user" || role === "assistant";
+}
+
+/** Tool results ride along; only user and assistant messages spend the window. */
+export function visibleWindowCount(messages: readonly unknown[]): number {
+  let count = 0;
+  for (const message of messages) if (isVisibleWindowMessage(message)) count++;
+  return count;
+}
+
 export function sliceSessionContext(
   context: SessionContext,
   options: { limit: number; before?: string } = { limit: SESSION_MESSAGE_WINDOW },
@@ -128,7 +141,14 @@ export function sliceSessionContext(
     }
     end = idx;
   }
-  const start = Math.max(0, end - options.limit);
+  let visible = 0;
+  let start = end;
+  for (let index = end - 1; index >= 0; index--) {
+    start = index;
+    if (!isVisibleWindowMessage(context.messages[index])) continue;
+    visible++;
+    if (visible >= options.limit) break;
+  }
   return {
     context: {
       ...context,

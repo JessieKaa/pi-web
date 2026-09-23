@@ -37,6 +37,7 @@ import {
 } from "./subagents";
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
+import { closeAllAgentEventStreams } from "./agent-event-stream";
 import { createReasoningRouterExtension } from "./reasoning-router";
 import { createSystemPromptOverride, createSystemPromptOverrideExtension, type SystemPromptOverride } from "./system-prompt-override";
 import { isSessionLeaseActive, leaseExpiresAt } from "./session-liveness";
@@ -1742,6 +1743,7 @@ function getRegistry(): Map<string, AgentSessionWrapper> {
     globalThis.__piSessions = new Map();
     const destroy = () => globalThis.__piSessions?.forEach((session) => session.destroy());
     const shutdown = () => {
+      closeAllAgentEventStreams();
       const sessions = Array.from(globalThis.__piSessions?.values() ?? []);
       void Promise.allSettled(sessions.map((session) => session.shutdown()));
     };

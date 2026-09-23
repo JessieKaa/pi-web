@@ -71,6 +71,8 @@ export interface SubagentExtensionRuntime {
   get(sessionId: string): Promise<SubagentRunInfo | null>;
   steer(sessionId: string, message: string): Promise<void>;
   notifyParent(run: SubagentRunInfo): Promise<void>;
+  /** Parent already collected this result, so the completion notification must not start another turn. */
+  claimResult(sessionId: string): boolean;
 }
 
 export type SubagentProfileProvider = () => readonly SubagentProfile[];
@@ -247,6 +249,9 @@ export function createSubagentExtension(
             });
             run = await runtime.get(params.agent_id);
             if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
+          }
+          if (run.status !== "starting" && run.status !== "running" && run.status !== "queued") {
+            runtime.claimResult?.(run.sessionId);
           }
           return {
             content: [{ type: "text", text: subagentFinalText(run) }],
