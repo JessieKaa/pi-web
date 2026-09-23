@@ -208,6 +208,7 @@ export const zhCNLocale: LocalePlugin = {
     "sidebar.projects": "项目",
     "sidebar.newTask": "新建任务",
     "sidebar.recent": "最近",
+    "sidebar.removeFromRecent": "从最近列表移除",
     "sidebar.archived": "已归档",
     "sidebar.archivedProjects": "已归档项目",
     "sidebar.addProject": "添加项目",

@@ -11,13 +11,13 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArrowDown, ArrowUp, ChevronRight, Ellipsis, Folder, FolderPlus, LoaderCircle, MessageSquare, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { Archive, ArrowDown, ArrowUp, ChevronRight, Ellipsis, Folder, FolderPlus, ListMinus, LoaderCircle, MessageSquare, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { useI18n } from "@/hooks/useI18n";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import { readArchivedSessionIds, writeArchivedSessionIds } from "@/lib/archived-sessions";
 import { filterProjectSessions, matchesSidebarQuery, sidebarProjectName, sidebarSessionTitle } from "@/lib/codex-sidebar-search";
 import type { ProjectPreference } from "@/lib/project-registry";
-import { buildRecentProjectGroups, filterRecentProjectGroups } from "@/lib/recent-sessions";
+import { buildRecentProjectGroups, filterRecentProjectGroups, pruneHiddenRecentSessions, readHiddenRecentSessions, writeHiddenRecentSessions } from "@/lib/recent-sessions";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { activeSessionRoots } from "@/lib/session-relations";
 import type { SessionInfo } from "@/lib/types";
@@ -194,6 +194,7 @@ export function CodexSidebar({
   const [unreadIds, setUnreadIds] = useState<Set<string>>(() => readStringSet(UNREAD_STORAGE_KEY));
   const [archivedIds, setArchivedIds] = useState<Set<string>>(() => readArchivedSessionIds());
   const [pinnedRecentIds, setPinnedRecentIds] = useState<Set<string>>(() => readStringSet(PINNED_RECENT_STORAGE_KEY));
+  const [hiddenRecentAt, setHiddenRecentAt] = useState(readHiddenRecentSessions);
   const [menuProject, setMenuProject] = useState<{ path: string; left: number; top: number } | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -276,6 +277,7 @@ export function CodexSidebar({
   useEffect(() => { writeStringSet(COLLAPSED_STORAGE_KEY, collapsed); }, [collapsed]);
   useEffect(() => { writeStringSet(UNREAD_STORAGE_KEY, unreadIds); }, [unreadIds]);
   useEffect(() => { writeStringSet(PINNED_RECENT_STORAGE_KEY, pinnedRecentIds); }, [pinnedRecentIds]);
+  useEffect(() => { writeHiddenRecentSessions(hiddenRecentAt); }, [hiddenRecentAt]);
   useEffect(() => {
     try {
       localStorage.setItem(RECENT_OPEN_STORAGE_KEY, recentOpen ? "1" : "0");
@@ -359,9 +361,17 @@ export function CodexSidebar({
     () => projects.filter((project) => !project.removed && !project.archived),
     [projects],
   );
+  useEffect(() => {
+    if (loading || error) return;
+    setHiddenRecentAt((current) => {
+      if (!current.size) return current;
+      const next = pruneHiddenRecentSessions(current, visibleSessions);
+      return next.size === current.size ? current : next;
+    });
+  }, [error, loading, visibleSessions]);
   const recentProjectGroups = useMemo(
-    () => filterRecentProjectGroups(buildRecentProjectGroups(visibleSessions, activeProjects, archivedIds, pinnedRecentIds), filterQuery),
-    [activeProjects, archivedIds, filterQuery, pinnedRecentIds, visibleSessions],
+    () => filterRecentProjectGroups(buildRecentProjectGroups(visibleSessions, activeProjects, archivedIds, pinnedRecentIds, 8, hiddenRecentAt), filterQuery),
+    [activeProjects, archivedIds, filterQuery, hiddenRecentAt, pinnedRecentIds, visibleSessions],
   );
   const quickSearch = quickQuery.trim().toLowerCase();
   const quickProjectResults = useMemo(() => activeProjects
@@ -811,10 +821,25 @@ export function CodexSidebar({
                     next.has(session.id) ? next.delete(session.id) : next.add(session.id);
                     return next;
                   })}
+                  onRemoveFromRecent={() => {
+                    setHiddenRecentAt((current) => new Map(current).set(session.id, session.modified));
+                    setPinnedRecentIds((current) => {
+                      if (!current.has(session.id)) return current;
+                      const next = new Set(current);
+                      next.delete(session.id);
+                      return next;
+                    });
+                  }}
                   relativeTime={formatRelativeTime(session.modified, locale)}
                   onSelect={() => selectSession(session)}
                   onChanged={() => void loadData(false)}
                   onDeleted={() => {
+                    setHiddenRecentAt((current) => {
+                      if (!current.has(session.id)) return current;
+                      const next = new Map(current);
+                      next.delete(session.id);
+                      return next;
+                    });
                     setPinnedRecentIds((current) => { const next = new Set(current); next.delete(session.id); return next; });
                     onSessionDeleted?.(session.id);
                     void loadData(false);
@@ -971,7 +996,16 @@ export function CodexSidebar({
                         unread={unreadIds.has(session.id)}
                         onSelect={() => selectSession(session)}
                         onChanged={() => void loadData(false)}
-                        onDeleted={() => { onSessionDeleted?.(session.id); void loadData(false); }}
+                        onDeleted={() => {
+                          setHiddenRecentAt((current) => {
+                            if (!current.has(session.id)) return current;
+                            const next = new Map(current);
+                            next.delete(session.id);
+                            return next;
+                          });
+                          onSessionDeleted?.(session.id);
+                          void loadData(false);
+                        }}
                         onArchive={() => {
                           setArchivedIds((current) => new Set(current).add(session.id));
                           setUnreadIds((current) => {
@@ -1126,7 +1160,7 @@ export function CodexSidebar({
   );
 }
 
-function SessionRow({ session, selected, running, unread, variant = "nested", pinned, onTogglePinned, relativeTime, onSelect, onChanged, onDeleted, onArchive }: {
+function SessionRow({ session, selected, running, unread, variant = "nested", pinned, onTogglePinned, onRemoveFromRecent, relativeTime, onSelect, onChanged, onDeleted, onArchive }: {
   session: SessionInfo;
   selected: boolean;
   running: boolean;
@@ -1134,6 +1168,7 @@ function SessionRow({ session, selected, running, unread, variant = "nested", pi
   variant?: "nested" | "recent";
   pinned?: boolean;
   onTogglePinned?: () => void;
+  onRemoveFromRecent?: () => void;
   relativeTime?: string;
   onSelect: () => void;
   onChanged: () => void;
@@ -1216,7 +1251,7 @@ function SessionRow({ session, selected, running, unread, variant = "nested", pi
     if (!handled) {
       setMenuPos({
         left: Math.max(8, Math.min(window.innerWidth - 180, event.clientX)),
-        top: Math.max(8, Math.min(window.innerHeight - 110, event.clientY)),
+        top: Math.max(8, Math.min(window.innerHeight - (isRecent ? 164 : 110), event.clientY)),
       });
     }
   };
@@ -1270,25 +1305,32 @@ function SessionRow({ session, selected, running, unread, variant = "nested", pi
         </IconButton>
       )}
       {isRecent && relativeTime ? <span className="codex-recent-session-time">{relativeTime}</span> : null}
-      {!session.transient && (
+      {(!session.transient || (isRecent && onRemoveFromRecent)) && (
         <div className="codex-session-menu-wrap">
           <IconButton ref={menuButtonRef} label={t("sidebar.sessionActions")} onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
             setMenuPos((current) => current ? null : {
               left: Math.max(8, Math.min(window.innerWidth - 180, rect.right - 172)),
-              top: Math.max(8, Math.min(window.innerHeight - 110, rect.bottom + 2)),
+              top: Math.max(8, Math.min(window.innerHeight - (isRecent ? 164 : 110), rect.bottom + 2)),
             });
           }}>
             <Ellipsis size={14} aria-hidden="true" />
           </IconButton>
           {menuPos && createPortal(
             <div ref={menuRef} className="codex-project-menu codex-project-menu-portal" role="menu" style={{ left: menuPos.left, top: menuPos.top }}>
-              {isRecent && !pinned && onTogglePinned && (
+              {isRecent && !session.transient && !pinned && onTogglePinned && (
                 <button type="button" role="menuitem" onClick={() => { setMenuPos(null); onTogglePinned(); }}><Pin size={14} aria-hidden="true" />{t("sidebar.pin")}</button>
               )}
-              <button type="button" role="menuitem" onClick={() => { setValue(title); setRenaming(true); setMenuPos(null); }}><Pencil size={14} aria-hidden="true" />{t("sidebar.rename")}</button>
-              <button type="button" role="menuitem" onClick={() => { setMenuPos(null); onArchive(); }}><Archive size={14} aria-hidden="true" />{t("sidebar.archiveSession")}</button>
-              <button type="button" role="menuitem" className="danger" onClick={() => { setMenuPos(null); setDeleteError(null); void remove(); }}><Trash2 size={14} aria-hidden="true" />{t("sidebar.delete")}</button>
+              {!session.transient && <button type="button" role="menuitem" onClick={() => { setValue(title); setRenaming(true); setMenuPos(null); }}><Pencil size={14} aria-hidden="true" />{t("sidebar.rename")}</button>}
+              {isRecent && onRemoveFromRecent && (
+                <button type="button" role="menuitem" onClick={() => { setMenuPos(null); onRemoveFromRecent(); }}><ListMinus size={14} aria-hidden="true" />{t("sidebar.removeFromRecent")}</button>
+              )}
+              {!session.transient && (
+                <>
+                  <button type="button" role="menuitem" onClick={() => { setMenuPos(null); onArchive(); }}><Archive size={14} aria-hidden="true" />{t("sidebar.archiveSession")}</button>
+                  <button type="button" role="menuitem" className="danger" onClick={() => { setMenuPos(null); setDeleteError(null); void remove(); }}><Trash2 size={14} aria-hidden="true" />{t("sidebar.delete")}</button>
+                </>
+              )}
             </div>,
             document.body,
           )}

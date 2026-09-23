@@ -144,8 +144,8 @@ test("desktop sidebar exposes new task, projects, and recent sessions", () => {
   assert.match(sidebar, /sidebar\.newTask/);
   assert.match(sidebar, /sidebar\.projects/);
   assert.match(sidebar, /sidebar\.recent/);
-  assert.match(sidebar, /buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds, pinnedRecentIds\)/);
-  assert.match(sidebar, /filterRecentProjectGroups\(buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds, pinnedRecentIds\), filterQuery\)/);
+  assert.match(sidebar, /buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds, pinnedRecentIds, 8, hiddenRecentAt\)/);
+  assert.match(sidebar, /filterRecentProjectGroups\(buildRecentProjectGroups\(visibleSessions, activeProjects, archivedIds, pinnedRecentIds, 8, hiddenRecentAt\), filterQuery\)/);
   assert.match(sidebar, /recentProjectGroups\.map/);
 });
 
@@ -223,10 +223,25 @@ test("recent sessions are grouped by project and preserve activity and session m
   assert.match(sidebar, /pi-web:recent-open/);
 });
 
+test("recent menu can remove a session from Recent while keeping its project row and file", () => {
+  const recentRow = sidebar.slice(sidebar.indexOf("{projectSessions.map((session) => ("), sidebar.indexOf("<section className=\"codex-sidebar-section\">", sidebar.indexOf("{projectSessions.map((session) => (")));
+  const sessionRow = sidebar.slice(sidebar.indexOf("function SessionRow("));
+  assert.match(recentRow, /onRemoveFromRecent=\{\(\) => \{/);
+  assert.match(recentRow, /setHiddenRecentAt\(\(current\) => new Map\(current\)\.set\(session\.id, session\.modified\)\)/);
+  assert.match(recentRow, /setPinnedRecentIds\(\(current\) => \{/);
+  assert.match(sessionRow, /\{isRecent && onRemoveFromRecent && \([\s\S]*?sidebar\.removeFromRecent/);
+  assert.match(sidebar, /writeHiddenRecentSessions\(hiddenRecentAt\)/);
+  assert.match(sidebar, /pruneHiddenRecentSessions\(current, visibleSessions\)/);
+  assert.match(sessionRow, /\(!session\.transient \|\| \(isRecent && onRemoveFromRecent\)\)/);
+  assert.match(sessionRow, /\{!session\.transient && \([\s\S]*?sidebar\.archiveSession/);
+  assert.doesNotMatch(recentRow, /method: "DELETE"/);
+  assert.doesNotMatch(sidebar.slice(sidebar.indexOf("{matchingSessions.map((session) => ("), sidebar.indexOf("</div>", sidebar.indexOf("{matchingSessions.map((session) => ("))), /onRemoveFromRecent=/);
+});
+
 test("recent session pin appears inline only after pinning through the overflow menu", () => {
   const sessionRow = sidebar.slice(sidebar.indexOf("function SessionRow("));
   assert.match(sessionRow, /\{isRecent && pinned && onTogglePinned && \([\s\S]*?label=\{t\("sidebar\.unpin"\)\}[\s\S]*?<Pin size=\{13\}[^>]*fill="currentColor"/);
-  assert.match(sessionRow, /\{isRecent && !pinned && onTogglePinned && \([\s\S]*?role="menuitem"[^>]*onClick=\{\(\) => \{ setMenuPos\(null\); onTogglePinned\(\); \}\}[^>]*><Pin size=\{14\}[^>]*>\{t\("sidebar\.pin"\)\}/);
+  assert.match(sessionRow, /\{isRecent && !session\.transient && !pinned && onTogglePinned && \([\s\S]*?role="menuitem"[^>]*onClick=\{\(\) => \{ setMenuPos\(null\); onTogglePinned\(\); \}\}[^>]*><Pin size=\{14\}[^>]*>\{t\("sidebar\.pin"\)\}/);
   assert.doesNotMatch(sessionRow, /label=\{pinned \? t\("sidebar\.unpin"\) : t\("sidebar\.pin"\)\}/);
 });
 

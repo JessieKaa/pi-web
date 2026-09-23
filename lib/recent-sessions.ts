@@ -1,6 +1,48 @@
 import { matchesSidebarQuery, sidebarProjectName, sidebarSessionTitle } from "./codex-sidebar-search";
 import type { SessionInfo } from "./types";
 
+const HIDDEN_RECENT_STORAGE_KEY = "pi-web:hidden-recent-session-modified";
+
+export function parseHiddenRecentSessions(raw: string | null): Map<string, string> {
+  try {
+    const value = JSON.parse(raw ?? "[]") as unknown;
+    if (!Array.isArray(value)) return new Map();
+    return new Map(value.filter((entry): entry is [string, string] =>
+      Array.isArray(entry) && entry.length === 2 && typeof entry[0] === "string" && typeof entry[1] === "string",
+    ));
+  } catch {
+    return new Map();
+  }
+}
+
+export function readHiddenRecentSessions(): Map<string, string> {
+  if (typeof window === "undefined") return new Map();
+  try {
+    return parseHiddenRecentSessions(localStorage.getItem(HIDDEN_RECENT_STORAGE_KEY));
+  } catch {
+    return new Map();
+  }
+}
+
+export function writeHiddenRecentSessions(hidden: ReadonlyMap<string, string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (hidden.size) localStorage.setItem(HIDDEN_RECENT_STORAGE_KEY, JSON.stringify([...hidden]));
+    else localStorage.removeItem(HIDDEN_RECENT_STORAGE_KEY);
+  } catch {
+    // Browser storage is best-effort.
+  }
+}
+
+export function pruneHiddenRecentSessions(
+  hidden: ReadonlyMap<string, string>,
+  visibleSessions: readonly Pick<SessionInfo, "id" | "modified">[],
+): Map<string, string> {
+  const modifiedById = new Map(visibleSessions.map((session) => [session.id, session.modified]));
+  return new Map([...hidden].filter(([id, modified]) =>
+    !modifiedById.has(id) || modifiedById.get(id) === modified));
+}
+
 export interface RecentProject {
   path: string;
   name?: string;
@@ -72,9 +114,11 @@ export function buildRecentProjectGroups(
   archivedIds: ReadonlySet<string>,
   pinnedSessionIds: ReadonlySet<string> = new Set(),
   limit = 8,
+  hiddenSessionModified: ReadonlyMap<string, string> = new Map(),
 ): RecentProjectGroup[] {
   const projectsByPath = new Map(projects.map((project) => [project.path, project]));
-  const allRows = buildRecentSessions(sessions, projects, archivedIds, Number.MAX_SAFE_INTEGER);
+  const allRows = buildRecentSessions(sessions, projects, archivedIds, Number.MAX_SAFE_INTEGER)
+    .filter((row) => hiddenSessionModified.get(row.session.id) !== row.session.modified);
   const visibleRows = new Map(allRows.slice(0, limit).map((row) => [row.session.id, row]));
 
   // Pinning is useful only if the conversation remains visible after newer

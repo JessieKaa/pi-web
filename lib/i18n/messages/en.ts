@@ -208,6 +208,7 @@ export const enLocale: LocalePlugin = {
     "sidebar.projects": "Projects",
     "sidebar.newTask": "New task",
     "sidebar.recent": "Recent",
+    "sidebar.removeFromRecent": "Remove from Recent",
     "sidebar.archived": "Archived",
     "sidebar.archivedProjects": "Archived projects",
     "sidebar.addProject": "Add project",
