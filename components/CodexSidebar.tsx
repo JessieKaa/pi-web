@@ -284,15 +284,18 @@ export function CodexSidebar({
     return grouped;
   }, [sessions]);
 
-  const visibleSessions = useMemo(() => sessions
-    .filter((session) => session.sessionRole !== "subagent" && !archivedIds.has(session.id))
-    .map((session) => {
+  const visibleSessions = useMemo(() => {
+    const seen = new Set<string>();
+    return sessions.flatMap((session) => {
+      if (session.sessionRole === "subagent" || archivedIds.has(session.id) || seen.has(session.id)) return [];
+      seen.add(session.id);
       const latestSubagent = subagentsByRoot.get(session.id)
         ?.reduce((latest, child) => child.modified > latest ? child.modified : latest, session.modified);
-      return latestSubagent && latestSubagent !== session.modified
+      return [latestSubagent && latestSubagent !== session.modified
         ? { ...session, modified: latestSubagent }
-        : session;
-    }), [archivedIds, sessions, subagentsByRoot]);
+        : session];
+    });
+  }, [archivedIds, sessions, subagentsByRoot]);
 
   const { roots: activeRootIds, unresolved: hasUnresolvedRunningIds } = useMemo(
     () => activeSessionRoots(sessions, runningIds, previousRunningRef.current ?? []),

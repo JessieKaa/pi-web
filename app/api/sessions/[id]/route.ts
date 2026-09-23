@@ -73,7 +73,14 @@ export async function GET(
   try {
     const rpc = getRpcSession(id);
     const liveRpc = rpc?.isAlive() ? rpc : undefined;
-    const resolvedPath = liveRpc ? null : await resolveSessionPath(id);
+    const liveFile = liveRpc
+      ? (liveRpc.sessionFile || liveRpc.inner.sessionManager.getSessionFile() || "")
+      : "";
+    const resolvedPath = liveFile && existsSync(liveFile)
+      ? liveFile
+      : liveRpc
+        ? null
+        : await resolveSessionPath(id);
     if (!liveRpc && !resolvedPath) {
       return Response.json({ error: "Session not found" }, { status: 404 });
     }
@@ -85,8 +92,8 @@ export async function GET(
     const { limit, before, leafId: leafIdParam } = parseSessionWindowParams(searchParams);
     const defer = { deferThinking, deferToolResultImages, deferToolResults };
 
-    if (!liveRpc) {
-      const filePath = resolvedPath!;
+    if (resolvedPath) {
+      const filePath = resolvedPath;
       const window = readSessionWindow(filePath, { limit, before, leafId: leafIdParam, ...defer });
       const header = readSessionHeader(filePath);
       const listInfo = readCachedSessionInfo(filePath);
@@ -99,7 +106,7 @@ export async function GET(
         path: filePath,
         id: header.id,
         cwd: header.cwd ?? "",
-        name: listInfo?.name,
+        name: liveRpc?.inner.sessionManager.getSessionName() || listInfo?.name,
         created: header.timestamp,
         modified: listInfo?.modified ?? modified,
         messageCount: listInfo?.messageCount != null
@@ -121,6 +128,7 @@ export async function GET(
       });
     }
 
+    if (!liveRpc) return Response.json({ error: "Session not found" }, { status: 404 });
     const sm = liveRpc.inner.sessionManager;
     const filePath = liveRpc.sessionFile || sm.getSessionFile() || "";
     const entries = sm.getEntries();

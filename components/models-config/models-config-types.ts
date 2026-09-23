@@ -59,7 +59,8 @@ export function withImageResize(model: ModelEntry, key: ImageResizeKey, raw: str
   if (!raw.trim()) delete resize[key];
   else {
     const value = Number(raw);
-    if (!Number.isInteger(value) || value < 0) return model;
+    const max = key === "jpegQuality" ? 100 : Number.POSITIVE_INFINITY;
+    if (!Number.isInteger(value) || value < 1 || value > max) return model;
     resize[key] = value;
   }
   const images = { ...(model.inputLimits?.images ?? {}) };

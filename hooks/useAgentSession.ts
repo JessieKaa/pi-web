@@ -21,7 +21,7 @@ import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-prese
 import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { contextUsageFromAssistant } from "@/lib/conversation-context";
-import { userMessageKey } from "@/lib/prompt-recovery";
+import { absorbOptimisticUserMessage, userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import {
@@ -1383,23 +1383,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         textDeltaBatcher.flush();
         const completed = event.message as AgentMessage | undefined;
         if (completed && completed.role === "user") {
-          // Delivered steering/follow-up messages surface here as user
-          // messages. The run's initial prompt also emits one, but handleSend
-          // already appended it optimistically. Consume only the still-adjacent
-          // optimistic bubble; later same-text queue deliveries must render.
+          // The initial prompt is already on screen. Pi 0.87 can emit a system
+          // message before that echo, so the optimistic bubble is not always last.
+          // A later same-text queue delivery has no optimistic key and still renders.
           const delivered = normalizeToolCalls(completed);
-          const deliveredKey = userMessageKey(delivered);
           const optimisticKey = optimisticUserMessageKeyRef.current;
           optimisticUserMessageKeyRef.current = null;
-          replaceMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (optimisticKey && last?.role === "user" && userMessageKey(last) === optimisticKey) {
-              return optimisticKey === deliveredKey
-                ? prev
-                : [...prev.slice(0, -1), delivered];
-            }
-            return [...prev, delivered];
-          });
+          replaceMessages((prev) => absorbOptimisticUserMessage(prev, delivered, optimisticKey));
         } else if (completed) {
           replaceMessages((prev) => [...prev, normalizeToolCalls(completed)]);
           if (completed.role === "assistant") {

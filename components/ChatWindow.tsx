@@ -920,8 +920,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg)"; }}
                   >
                     <Icon size={16} strokeWidth={1.8} color={color} aria-hidden="true" />
-                    <span>{t(key)}</span>
-                    <span style={{ color: "var(--text-dim)", fontSize: "var(--text-meta)" }}>{t("chat.homeSkill", { skill })}</span>
+                    <span style={{ textWrap: "balance" }}>{t(key)}</span>
+                    <span style={{ color: "var(--text-dim)", fontSize: "var(--text-meta)", overflowWrap: "break-word" }}>{t("chat.homeSkill", { skill: skill.replaceAll("-", "-\u200b") })}</span>
                   </button>
                 ))}
               </div>

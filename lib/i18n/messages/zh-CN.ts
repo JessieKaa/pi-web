@@ -38,7 +38,7 @@ export const zhCNLocale: LocalePlugin = {
     "settings.cacheWarmingStreaming": "流式输出时",
     "settings.cacheWarmingIdle": "流式输出和空闲时",
     "settings.imageAutoResize": "缩放图片",
-    "settings.imageAutoResizeDescription": "图片进入模型上下文前先缩小。对话里仍保留原图。",
+    "settings.imageAutoResizeDescription": "图片进入模型上下文前先缩小。对话里仍保留原图。正在进行的会话要到下次开始才会改读取设置。项目设置会盖过这个开关。",
     "settings.about": "关于",
     "settings.aboutVersion": "web v{web} · pi v{pi}",
     "settings.projectSettingsDescription": "选择项目后可查看其设置与安全状态。",

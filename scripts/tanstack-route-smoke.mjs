@@ -1,5 +1,5 @@
 /**
- * Shared safe route matrix for the 48 TanStack API adapters.
+ * Shared safe route matrix for the 49 TanStack API adapters.
  *
  * Used identically by standalone and installed-package smoke runs. Never
  * mutates user state: write endpoints are probed with invalid bodies

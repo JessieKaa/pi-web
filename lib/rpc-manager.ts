@@ -1855,24 +1855,35 @@ export function applyRpcCacheWarmingMode(mode: CacheWarmingMode, cwd?: string): 
   return applied;
 }
 
-/** Pi 0.87 image auto-resize. `cwd` only selects project-level setting overrides. */
+/** Global image auto-resize. Project overrides stay out of this switch. */
 export function getRpcImageAutoResize(cwd?: string): boolean {
   const registry = globalThis.__piSessions;
   for (const wrapper of registry?.values() ?? []) {
-    if (wrapper.isAlive()) return wrapper.inner.settingsManager.getImageAutoResize();
+    if (!wrapper.isAlive()) continue;
+    return wrapper.inner.settingsManager.getGlobalSettings().images?.autoResize ?? true;
   }
-  return SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).getImageAutoResize();
+  return SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).getGlobalSettings().images?.autoResize ?? true;
 }
 
-/** Persist the toggle and update every live session's in-memory copy. */
-export function applyRpcImageAutoResize(enabled: boolean, cwd?: string): number {
+/**
+ * Persist the global toggle. Idle sessions reload so the `read` tool, which
+ * snapshots the flag at build time, picks it up. A running session is left
+ * alone and keeps the previous tool until it starts again.
+ */
+export async function applyRpcImageAutoResize(enabled: boolean, cwd?: string): Promise<number> {
   let applied = 0;
+  const reloads: Promise<void>[] = [];
   for (const wrapper of getRegistry().values()) {
     if (!wrapper.isAlive()) continue;
     wrapper.inner.settingsManager.setImageAutoResize(enabled);
     applied += 1;
+    if (wrapper.isRunning()) continue;
+    reloads.push(Promise.resolve(wrapper.inner.reload()).catch((error: unknown) => {
+      console.error(`[pi-web] failed to reload session ${wrapper.sessionId} after image resize change:`, error);
+    }));
   }
   if (applied === 0) SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).setImageAutoResize(enabled);
+  await Promise.all(reloads);
   return applied;
 }
 

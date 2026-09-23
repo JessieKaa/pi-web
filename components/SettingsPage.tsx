@@ -184,7 +184,9 @@ export function SettingsPage({
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled, cwd: cwd ?? undefined }),
-    }).catch(() => {});
+    }).then((response) => {
+      if (!response.ok) setImageAutoResize(!enabled);
+    }).catch(() => setImageAutoResize(!enabled));
   }, [cwd, imageAutoResize]);
 
   const close = useCallback(() => {

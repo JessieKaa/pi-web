@@ -13,9 +13,19 @@ export function sidebarProjectName(path: string): string {
   return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 }
 
+function plainSidebarText(value: string): string {
+  return value
+    .replace(/\[([^\[\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function sidebarSessionTitle(session: SessionInfo): string {
-  const firstMessage = skillExpansionToCommand(session.firstMessage) ?? session.firstMessage;
-  return session.name || firstMessage.slice(0, 72) || session.id.slice(0, 12);
+  const name = plainSidebarText(session.name ?? "");
+  if (name) return name;
+  const firstMessage = plainSidebarText(skillExpansionToCommand(session.firstMessage) ?? session.firstMessage);
+  return firstMessage.slice(0, 72) || session.id.slice(0, 12);
 }
 
 export function matchesSidebarQuery(values: Array<string | undefined>, query: string): boolean {

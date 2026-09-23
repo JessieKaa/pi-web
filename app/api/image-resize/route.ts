@@ -28,7 +28,7 @@ export async function PUT(req: Request) {
     const { applyRpcImageAutoResize } = await import("@/lib/rpc-manager");
     return Response.json({
       enabled: body.enabled,
-      sessions: applyRpcImageAutoResize(body.enabled, optionalCwd(body.cwd)),
+      sessions: await applyRpcImageAutoResize(body.enabled, optionalCwd(body.cwd)),
     });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });

@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { resolveSessionPath, buildSessionContext, readSessionWindow } from "@/lib/session-reader";
 import { getRpcSession } from "@/lib/rpc-manager";
 import { parseSessionWindowParams, sliceSessionContext } from "@/lib/session-window";
@@ -17,16 +18,24 @@ export async function GET(
   try {
     const rpc = getRpcSession(id);
     const liveRpc = rpc?.isAlive() ? rpc : undefined;
-    const filePath = liveRpc ? null : await resolveSessionPath(id);
+    const liveFile = liveRpc
+      ? (liveRpc.sessionFile || liveRpc.inner.sessionManager.getSessionFile() || "")
+      : "";
+    const filePath = liveFile && existsSync(liveFile)
+      ? liveFile
+      : liveRpc
+        ? null
+        : await resolveSessionPath(id);
     if (!liveRpc && !filePath) {
       return Response.json({ error: "Session not found" }, { status: 404 });
     }
 
-    if (!liveRpc) {
-      const window = readSessionWindow(filePath!, { limit, before, leafId, ...defer });
+    if (filePath) {
+      const window = readSessionWindow(filePath, { limit, before, leafId, ...defer });
       return Response.json({ context: window.context, hasMore: window.hasMore });
     }
 
+    if (!liveRpc) return Response.json({ error: "Session not found" }, { status: 404 });
     const full = buildSessionContext(liveRpc.inner.sessionManager.getEntries() as never, leafId, defer);
     const { context, hasMore } = sliceSessionContext(full, { limit, before });
     return Response.json({ context, hasMore });

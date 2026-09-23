@@ -38,7 +38,7 @@ export const enLocale: LocalePlugin = {
     "settings.cacheWarmingStreaming": "While streaming",
     "settings.cacheWarmingIdle": "While streaming and idle",
     "settings.imageAutoResize": "Resize images",
-    "settings.imageAutoResizeDescription": "Shrink images before they enter the model context. The chat keeps the original.",
+    "settings.imageAutoResizeDescription": "Shrink images before they enter the model context. The chat keeps the original. A running session keeps the previous image read setting until it starts again. A project setting overrides this switch.",
     "settings.about": "About",
     "settings.aboutVersion": "web v{web} · pi v{pi}",
     "settings.projectSettingsDescription": "Select a project to view its settings and security status.",

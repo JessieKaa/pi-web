@@ -17,6 +17,10 @@ test("image resize fields round-trip without dropping sibling limits", () => {
 test("blank and invalid resize input drops only that field", () => {
   const sized = withImageResize(withImageResize(model, "maxWidth", "800"), "jpegQuality", "70");
   assert.equal(withImageResize(sized, "jpegQuality", "1.5"), sized);
+  assert.equal(withImageResize(sized, "jpegQuality", "0"), sized);
+  assert.equal(withImageResize(sized, "jpegQuality", "101"), sized);
+  assert.equal(withImageResize(sized, "maxWidth", "0"), sized);
+  assert.equal(withImageResize(sized, "jpegQuality", "100").inputLimits.images.resize.jpegQuality, 100);
   const cleared = withImageResize(sized, "maxWidth", " ");
   assert.deepEqual(cleared.inputLimits.images.resize, { jpegQuality: 70 });
   assert.equal(withImageResize(cleared, "jpegQuality", "").inputLimits.images.resize, undefined);

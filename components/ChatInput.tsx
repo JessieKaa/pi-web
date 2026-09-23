@@ -2309,7 +2309,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               fontSize: "var(--text-chat)",
               lineHeight: "var(--leading-prose)",
               fontFamily: "inherit",
-              minHeight: compact ? 96 : isMobile ? 24 : 28,
+              minHeight: compact ? 96 : isMobile ? 72 : 28,
               maxHeight: 200,
               overflow: "auto",
             }}
