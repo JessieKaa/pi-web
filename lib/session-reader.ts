@@ -14,7 +14,7 @@ import { extractGoalFromEntries } from "./goal-panel";
 import { normalizeToolCalls } from "./normalize";
 import { sessionPathKey } from "./paths";
 import { projectTreeForResponse } from "./project-tree";
-import { SESSION_MESSAGE_WINDOW, SESSION_WINDOW_INITIAL_BYTES, SESSION_WINDOW_MAX_BYTES, sliceSessionContext } from "./session-window";
+import { SESSION_MESSAGE_WINDOW, SESSION_WINDOW_INITIAL_BYTES, SESSION_WINDOW_MAX_BYTES, sliceSessionContext, visibleWindowCount } from "./session-window";
 import { sessionPathHasThinkingLevelChange } from "./thinking-level";
 import { computeSessionTotalActiveMs } from "./session-timing";
 import { resolveProject, type ProjectInfo } from "./worktree";
@@ -895,6 +895,9 @@ function entryToUiMessage(
         details: entry.details,
         timestamp: parseEntryTimestamp(entry.timestamp),
       };
+    case "context_edit":
+    case "usage":
+      return null;
     default:
       return null;
   }
@@ -1037,7 +1040,7 @@ function windowFromEntries(
   const hasMore = sliced.hasMore
     || (firstEntry?.type !== "compaction" && firstEntry?.parentId != null && !options.reachedStart);
   const ready = options.reachedStart
-    || sliced.context.messages.length >= options.limit
+    || visibleWindowCount(sliced.context.messages) >= options.limit
     || Boolean(options.hitByteCap && sliced.context.messages.length > 0 && !options.before);
   return { ready, context: sliced.context, hasMore, leafId };
 }
@@ -1204,6 +1207,7 @@ export function readSessionTranscriptWindow(
   const { context, hasMore } = sliceSessionContext(full, {
     limit: options.limit ?? SESSION_MESSAGE_WINDOW,
     before: options.before,
+    mode: "entries",
   });
   return {
     context,

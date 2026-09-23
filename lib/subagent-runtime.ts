@@ -89,6 +89,8 @@ type StoredSubagentExecution = {
   cancelQueued?: () => boolean;
 };
 
+export const SUBAGENT_REPORT_PREFIX = "[subagent-notification] Background task report, not a new user instruction.\n";
+
 declare global {
   var __piSubagentRuns: Map<string, StoredSubagentExecution> | undefined;
   var __piSubagentQueue: SubagentQueue<SubagentRunInfo> | undefined;
@@ -104,6 +106,55 @@ function getSubagentRuns(): Map<string, StoredSubagentExecution> {
 function getSubagentQueue(): SubagentQueue<SubagentRunInfo> {
   if (!globalThis.__piSubagentQueue) globalThis.__piSubagentQueue = new SubagentQueue();
   return globalThis.__piSubagentQueue;
+}
+
+declare global {
+  var __piSubagentResultClaims: Set<string> | undefined;
+  var __piSubagentNotifyInflight: Set<string> | undefined;
+}
+
+/**
+ * A permanent claim: the result has been shown to the user, either by
+ * get_subagent_result or by a notification whose sendCustomMessage resolved. It is
+ * never released, so a later notification cannot re-report a result the user already has.
+ */
+function subagentResultKey(run: Pick<SubagentRunInfo, "sessionId" | "completedAt">): string {
+  // resume keeps the session id but produces a new completion. Claims belong to
+  // a completion, so a second background run can report its own result.
+  return `${run.sessionId}\0${run.completedAt ?? ""}`;
+}
+
+function claimSubagentResult(run: Pick<SubagentRunInfo, "sessionId" | "completedAt">): boolean {
+  const key = subagentResultKey(run);
+  if (!globalThis.__piSubagentResultClaims) globalThis.__piSubagentResultClaims = new Set();
+  if (globalThis.__piSubagentResultClaims.has(key)) return false;
+  globalThis.__piSubagentResultClaims.add(key);
+  return true;
+}
+
+function getSubagentNotifyInflight(): Set<string> {
+  if (!globalThis.__piSubagentNotifyInflight) globalThis.__piSubagentNotifyInflight = new Set();
+  return globalThis.__piSubagentNotifyInflight;
+}
+
+/**
+ * Reserve the single in-flight notification slot for a child. The permanent claim
+ * covers delivered/collected results; this second set guards the window between
+ * claiming and sendCustomMessage resolving. A failed send releases only this slot, so
+ * a retry can deliver the result while get_subagent_result's claim stays permanent.
+ */
+function beginSubagentNotification(run: SubagentRunInfo): boolean {
+  const key = subagentResultKey(run);
+  if (globalThis.__piSubagentResultClaims?.has(key)) return false;
+  const inflight = getSubagentNotifyInflight();
+  if (inflight.has(key)) return false;
+  inflight.add(key);
+  return true;
+}
+
+function finishSubagentNotification(run: SubagentRunInfo, delivered: boolean): void {
+  getSubagentNotifyInflight().delete(subagentResultKey(run));
+  if (delivered) claimSubagentResult(run);
 }
 
 /** A fire-and-forget steer/abort must not become a silent lost rejection. */
@@ -669,12 +720,21 @@ export function createSubagentController(
     }
     await parent.waitUntilReady();
     if (!parent.isAlive()) throw new Error(`Parent session is no longer available: ${run.parentSessionId}`);
-    await parent.inner.sendCustomMessage({
-      customType: "pi-web:subagent-notification",
-      content: subagentFinalText(run),
-      display: true,
-      details: subagentToolDetails(run),
-    }, { deliverAs: "followUp", triggerTurn: true });
+    if (!beginSubagentNotification(run)) return;
+    let delivered = false;
+    try {
+      await parent.inner.sendCustomMessage({
+        customType: "pi-web:subagent-notification",
+        content: `${SUBAGENT_REPORT_PREFIX}${subagentFinalText(run)}`,
+        display: true,
+        details: subagentToolDetails(run),
+      }, { deliverAs: "followUp", triggerTurn: true });
+      delivered = true;
+    } finally {
+      // A throw here means the parent never received the report; release the in-flight
+      // slot so a retry can deliver it. Only a resolved send becomes a permanent claim.
+      finishSubagentNotification(run, delivered);
+    }
   }
 
   async function abort(sessionId: string): Promise<void> {
@@ -691,7 +751,7 @@ export function createSubagentController(
   }
 
   return {
-    extensionRuntime: { start, resume, get, steer, notifyParent },
+    extensionRuntime: { start, resume, get, steer, notifyParent, claimResult: claimSubagentResult },
     get,
     steer,
     abort,

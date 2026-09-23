@@ -26,6 +26,7 @@ import { Network,
 } from "lucide-react";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { CodexSidebar } from "./CodexSidebar";
+import { sidebarSessionTitle } from "@/lib/codex-sidebar-search";
 import { hasActiveDescendant, useSubagentTree } from "@/hooks/useSubagentTree";
 import { SessionBreadcrumb, SubagentComposer, SubagentTree, buildBreadcrumbItems, countSubagentNodes, findSubagentNode } from "./SubagentSessions";
 import type { SubagentTreeNode } from "@/lib/api-types";
@@ -1605,8 +1606,7 @@ export function AppShell() {
           padding: mobile ? 0 : "4px 10px",
           height: mobile ? "100%" : 24,
           overflow: "hidden",
-          visibility: covered ? "hidden" : "visible",
-          pointerEvents: covered ? "none" : "auto",
+          ...(covered ? { visibility: "hidden" as const, pointerEvents: "none" as const } : {}),
           background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
           border: mobile ? "none" : `1px solid ${activeTopPanel === "session" ? "color-mix(in srgb, var(--accent) 45%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
           borderRadius: 7,
@@ -1878,14 +1878,15 @@ export function AppShell() {
               <Menu size={18} strokeWidth={2} aria-hidden="true" />
             )}
           </button>
-          {!isMobile && selectedSession && (
+          {selectedSession && (
             <div
-              title={selectedSession.name || selectedSession.firstMessage || translate("i18n.newSession")}
+              title={sidebarSessionTitle(selectedSession)}
               style={{
                 marginLeft: 12,
+                flex: isMobile ? "0 1 auto" : undefined,
                 flexShrink: 1,
                 minWidth: 0,
-                maxWidth: "32vw",
+                maxWidth: isMobile ? "42%" : "32vw",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
@@ -1894,7 +1895,7 @@ export function AppShell() {
                 fontFamily: "var(--font-mono)",
               }}
             >
-              {selectedSession.name || selectedSession.firstMessage || translate("i18n.newSession")}
+              {sidebarSessionTitle(selectedSession)}
             </div>
           )}
           {isMobile && (

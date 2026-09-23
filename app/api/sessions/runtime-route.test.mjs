@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -103,6 +103,194 @@ test("live detail and state routes work without a persisted JSONL file", async (
     running: true,
     state: { isStreaming: true },
   });
+});
+
+test("a live session with a file reads message windows from disk", async (t) => {
+  const previousRegistry = globalThis.__piSessions;
+  const dir = mkdtempSync(join(tmpdir(), "pi-web-live-file-"));
+  const id = "live-file-route-test";
+  const path = join(dir, `${id}.jsonl`);
+  writeFileSync(path, `${JSON.stringify({
+    type: "session", version: 3, id, timestamp: "2026-08-14T00:00:00.000Z", cwd: dir,
+  })}\n${JSON.stringify({
+    type: "message", id: "m1", parentId: null, timestamp: "2026-08-14T00:00:01.000Z",
+    message: { role: "user", content: "from file" },
+  })}\n`);
+  cacheSessionPath(id, path);
+  globalThis.__piSessions = new Map([[id, {
+    isAlive: () => true,
+    inner: { sessionManager: {
+      getSessionFile: () => path,
+      getSessionName: () => "live name",
+      getEntries: () => [],
+      getTree: () => [],
+    } },
+    sessionFile: path,
+  }]]);
+  t.after(() => {
+    globalThis.__piSessions = previousRegistry;
+  });
+
+  const detail = await (await getSessionDetail(
+    new Request(`http://localhost/api/sessions/${id}`),
+    { params: Promise.resolve({ id }) },
+  )).json();
+  assert.equal(detail.context.messages[0].content, "from file");
+  assert.equal(detail.info.name, "live name");
+
+  const { GET: getSessionContext } = await jiti.import("./[id]/context/route.ts");
+  const context = await (await getSessionContext(
+    new Request(`http://localhost/api/sessions/${id}/context`),
+    { params: Promise.resolve({ id }) },
+  )).json();
+  assert.equal(context.context.messages[0].content, "from file");
+});
+
+test("live file windows follow the active branch instead of the last JSONL entry", async (t) => {
+  const previousRegistry = globalThis.__piSessions;
+  const dir = mkdtempSync(join(tmpdir(), "pi-web-live-leaf-"));
+  const id = "live-leaf-route-test";
+  const path = join(dir, `${id}.jsonl`);
+  const timestamp = "2026-08-14T00:00:00.000Z";
+  const entries = [
+    { type: "message", id: "u1", parentId: null, timestamp, message: { role: "user", content: "root" } },
+    { type: "message", id: "a1", parentId: "u1", timestamp, message: { role: "assistant", content: [{ type: "text", text: "selected" }] } },
+    { type: "message", id: "u2", parentId: "u1", timestamp, message: { role: "user", content: "other branch" } },
+  ];
+  writeFileSync(path, `${[JSON.stringify({ type: "session", version: 3, id, timestamp, cwd: dir }), ...entries.map(JSON.stringify)].join("\n")}\n`);
+  globalThis.__piSessions = new Map([[id, {
+    isAlive: () => true,
+    sessionFile: path,
+    inner: { sessionManager: {
+      getSessionFile: () => path,
+      getSessionName: () => undefined,
+      getLeafId: () => "a1",
+      getEntries: () => entries,
+      getTree: () => [],
+    } },
+  }]]);
+  t.after(() => {
+    globalThis.__piSessions = previousRegistry;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  for (const history of ["context", "transcript"]) {
+    const detail = await (await getSessionDetail(
+      new Request(`http://localhost/api/sessions/${id}?history=${history}`),
+      { params: Promise.resolve({ id }) },
+    )).json();
+    assert.equal(detail.leafId, "a1");
+    assert.deepEqual(detail.context.entryIds, ["u1", "a1"]);
+    const context = await (await getSessionContext(
+      new Request(`http://localhost/api/sessions/${id}/context?history=${history}`),
+      { params: Promise.resolve({ id }) },
+    )).json();
+    assert.equal(context.leafId, "a1");
+    assert.deepEqual(context.context.entryIds, ["u1", "a1"]);
+  }
+});
+
+test("live JSONL windows fall back to the in-memory leaf and cursor before flush", async (t) => {
+  const previousRegistry = globalThis.__piSessions;
+  const dir = mkdtempSync(join(tmpdir(), "pi-web-live-unflushed-"));
+  const id = "live-unflushed-route-test";
+  const path = join(dir, `${id}.jsonl`);
+  const timestamp = "2026-08-14T00:00:00.000Z";
+  const root = { type: "message", id: "u1", parentId: null, timestamp, message: { role: "user", content: "persisted" } };
+  const answer = { type: "message", id: "a1", parentId: "u1", timestamp, message: { role: "assistant", content: [{ type: "text", text: "unflushed" }] } };
+  const sibling = { type: "message", id: "b1", parentId: "u1", timestamp, message: { role: "user", content: "another unflushed branch" } };
+  writeFileSync(path, `${JSON.stringify({ type: "session", version: 3, id, timestamp, cwd: dir })}\n${JSON.stringify(root)}\n`);
+  globalThis.__piSessions = new Map([[id, {
+    isAlive: () => true,
+    sessionFile: path,
+    inner: { sessionManager: {
+      getSessionFile: () => path,
+      getSessionName: () => undefined,
+      getLeafId: () => "a1",
+      getEntries: () => [root, answer, sibling],
+      getHeader: () => ({ type: "session", version: 3, id, timestamp, cwd: dir }),
+      getTree: () => [],
+    } },
+  }]]);
+  t.after(() => {
+    globalThis.__piSessions = previousRegistry;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const params = { params: Promise.resolve({ id }) };
+  for (const history of ["context", "transcript"]) {
+    const detail = await (await getSessionDetail(new Request(`http://localhost/api/sessions/${id}?history=${history}`), params)).json();
+    assert.equal(detail.leafId, "a1", `${history} must use the live leaf`);
+    assert.deepEqual(detail.context.entryIds, ["u1", "a1"], `${history} must include the unflushed reply`);
+    const context = await (await getSessionContext(new Request(`http://localhost/api/sessions/${id}/context?history=${history}`), params)).json();
+    assert.equal(context.leafId, "a1");
+    assert.deepEqual(context.context.entryIds, ["u1", "a1"]);
+  }
+  const siblingContext = await getSessionContext(new Request(`http://localhost/api/sessions/${id}/context?leafId=b1`), params);
+  assert.deepEqual((await siblingContext.json()).context.entryIds, ["u1", "b1"], "explicit branch selection must use the unflushed leaf");
+  const older = await getSessionContext(new Request(`http://localhost/api/sessions/${id}/context?history=transcript&before=a1`), params);
+  assert.equal(older.status, 200);
+  assert.deepEqual((await older.json()).context.entryIds, ["u1"]);
+  const stale = await getSessionContext(new Request(`http://localhost/api/sessions/${id}/context?history=transcript&before=rewritten`), params);
+  assert.equal(stale.status, 409);
+});
+
+test("live file windows use complete runtime timing and branch metadata", async (t) => {
+  const previousRegistry = globalThis.__piSessions;
+  const dir = mkdtempSync(join(tmpdir(), "pi-web-live-metadata-"));
+  const id = "live-metadata-route-test";
+  const path = join(dir, `${id}.jsonl`);
+  const timestamp = "2026-08-14T00:00:00.000Z";
+  const start = Date.parse(timestamp);
+  const entries = Array.from({ length: 1000 }, (_, index) => ({
+    type: "message",
+    id: `m${index}`,
+    parentId: index ? `m${index - 1}` : null,
+    timestamp: new Date(start + index * 1000).toISOString(),
+    message: index % 2
+      ? { role: "assistant", content: [{ type: "text", text: "answer" }] }
+      : { role: "user", content: "x".repeat(1800) },
+  }));
+  writeFileSync(path, `${[JSON.stringify({ type: "session", version: 3, id, timestamp, cwd: dir }), ...entries.map(JSON.stringify)].join("\n")}\n`);
+  const fullTree = [{ entry: entries[0], children: [] }];
+  let entryScans = 0;
+  let treeBuilds = 0;
+  globalThis.__piSessions = new Map([[id, {
+    isAlive: () => true,
+    sessionFile: path,
+    inner: { sessionManager: {
+      getSessionFile: () => path,
+      getSessionName: () => undefined,
+      getLeafId: () => entries.at(-1).id,
+      getEntries: () => { entryScans++; return entries; },
+      getTree: () => { treeBuilds++; return fullTree; },
+    } },
+  }]]);
+  t.after(() => {
+    globalThis.__piSessions = previousRegistry;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const response = await getSessionDetail(
+    new Request(`http://localhost/api/sessions/${id}`),
+    { params: Promise.resolve({ id }) },
+  );
+  assert.equal(response.status, 200);
+  const detail = await response.json();
+  assert.equal(detail.totalActiveMs, 500_000);
+  assert.equal(detail.info.messageCount, 1000);
+  assert.equal(detail.info.firstMessage, "x".repeat(200));
+  assert.equal(detail.tree[0].entry.id, "m0");
+  assert.equal(detail.hasMore, true);
+  assert.equal(detail.context.entryIds.at(-1), "m999");
+  const repeat = await getSessionDetail(new Request(`http://localhost/api/sessions/${id}`), { params: Promise.resolve({ id }) });
+  assert.equal(repeat.status, 200);
+  assert.equal(entryScans, 1, "unchanged JSONL should reuse complete live metadata");
+  assert.equal(treeBuilds, 1, "unchanged JSONL should not rebuild the full tree");
+  const appended = { type: "message", id: "m1000", parentId: "m999", timestamp: new Date(start + 1_000_000).toISOString(), message: { role: "user", content: "new" } };
+  entries.push(appended);
+  writeFileSync(path, `${JSON.stringify(appended)}\n`, { flag: "a" });
+  const updated = await (await getSessionDetail(new Request(`http://localhost/api/sessions/${id}`), { params: Promise.resolve({ id }) })).json();
+  assert.equal(updated.info.messageCount, 1001);
+  assert.equal(entryScans, 2, "appending JSONL should invalidate the live metadata cache");
+  assert.equal(treeBuilds, 2);
 });
 
 test("idle session state does not start a runtime", async (t) => {

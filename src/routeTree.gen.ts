@@ -15,6 +15,7 @@ import { Route as ApiCacheWarmingRouteImport } from './routes/api/cache-warming'
 import { Route as ApiDefaultCwdRouteImport } from './routes/api/default-cwd'
 import { Route as ApiFileIndexRouteImport } from './routes/api/file-index'
 import { Route as ApiHomeRouteImport } from './routes/api/home'
+import { Route as ApiImageResizeRouteImport } from './routes/api/image-resize'
 import { Route as ApiModelsRouteImport } from './routes/api/models'
 import { Route as ApiModelsConfigRouteImport } from './routes/api/models-config'
 import { Route as ApiPluginsRouteImport } from './routes/api/plugins'
@@ -40,6 +41,7 @@ import { Route as ApiGitStatusRouteImport } from './routes/api/git/status'
 import { Route as ApiModelsConfigCatalogRouteImport } from './routes/api/models-config/catalog'
 import { Route as ApiModelsConfigDiscoverRouteImport } from './routes/api/models-config/discover'
 import { Route as ApiModelsConfigTestRouteImport } from './routes/api/models-config/test'
+import { Route as ApiModelsScopeRouteImport } from './routes/api/models/scope'
 import { Route as ApiSessionsIdRouteImport } from './routes/api/sessions/$id'
 import { Route as ApiSkillsCheckRouteImport } from './routes/api/skills/check'
 import { Route as ApiSkillsInstallRouteImport } from './routes/api/skills/install'
@@ -88,6 +90,11 @@ const ApiFileIndexRoute = ApiFileIndexRouteImport.update({
 const ApiHomeRoute = ApiHomeRouteImport.update({
   id: '/api/home',
   path: '/api/home',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiImageResizeRoute = ApiImageResizeRouteImport.update({
+  id: '/api/image-resize',
+  path: '/api/image-resize',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiModelsRoute = ApiModelsRouteImport.update({
@@ -216,6 +223,11 @@ const ApiModelsConfigTestRoute = ApiModelsConfigTestRouteImport.update({
   path: '/test',
   getParentRoute: () => ApiModelsConfigRoute,
 } as any)
+const ApiModelsScopeRoute = ApiModelsScopeRouteImport.update({
+  id: '/scope',
+  path: '/scope',
+  getParentRoute: () => ApiModelsRoute,
+} as any)
 const ApiSessionsIdRoute = ApiSessionsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -322,7 +334,8 @@ export interface FileRoutesByFullPath {
   '/api/default-cwd': typeof ApiDefaultCwdRoute
   '/api/file-index': typeof ApiFileIndexRoute
   '/api/home': typeof ApiHomeRoute
-  '/api/models': typeof ApiModelsRoute
+  '/api/image-resize': typeof ApiImageResizeRoute
+  '/api/models': typeof ApiModelsRouteWithChildren
   '/api/models-config': typeof ApiModelsConfigRouteWithChildren
   '/api/plugins': typeof ApiPluginsRoute
   '/api/project-trust': typeof ApiProjectTrustRoute
@@ -347,6 +360,7 @@ export interface FileRoutesByFullPath {
   '/api/models-config/catalog': typeof ApiModelsConfigCatalogRoute
   '/api/models-config/discover': typeof ApiModelsConfigDiscoverRoute
   '/api/models-config/test': typeof ApiModelsConfigTestRoute
+  '/api/models/scope': typeof ApiModelsScopeRoute
   '/api/sessions/$id': typeof ApiSessionsIdRouteWithChildren
   '/api/skills/check': typeof ApiSkillsCheckRoute
   '/api/skills/install': typeof ApiSkillsInstallRoute
@@ -374,7 +388,8 @@ export interface FileRoutesByTo {
   '/api/default-cwd': typeof ApiDefaultCwdRoute
   '/api/file-index': typeof ApiFileIndexRoute
   '/api/home': typeof ApiHomeRoute
-  '/api/models': typeof ApiModelsRoute
+  '/api/image-resize': typeof ApiImageResizeRoute
+  '/api/models': typeof ApiModelsRouteWithChildren
   '/api/models-config': typeof ApiModelsConfigRouteWithChildren
   '/api/plugins': typeof ApiPluginsRoute
   '/api/project-trust': typeof ApiProjectTrustRoute
@@ -399,6 +414,7 @@ export interface FileRoutesByTo {
   '/api/models-config/catalog': typeof ApiModelsConfigCatalogRoute
   '/api/models-config/discover': typeof ApiModelsConfigDiscoverRoute
   '/api/models-config/test': typeof ApiModelsConfigTestRoute
+  '/api/models/scope': typeof ApiModelsScopeRoute
   '/api/sessions/$id': typeof ApiSessionsIdRouteWithChildren
   '/api/skills/check': typeof ApiSkillsCheckRoute
   '/api/skills/install': typeof ApiSkillsInstallRoute
@@ -427,7 +443,8 @@ export interface FileRoutesById {
   '/api/default-cwd': typeof ApiDefaultCwdRoute
   '/api/file-index': typeof ApiFileIndexRoute
   '/api/home': typeof ApiHomeRoute
-  '/api/models': typeof ApiModelsRoute
+  '/api/image-resize': typeof ApiImageResizeRoute
+  '/api/models': typeof ApiModelsRouteWithChildren
   '/api/models-config': typeof ApiModelsConfigRouteWithChildren
   '/api/plugins': typeof ApiPluginsRoute
   '/api/project-trust': typeof ApiProjectTrustRoute
@@ -452,6 +469,7 @@ export interface FileRoutesById {
   '/api/models-config/catalog': typeof ApiModelsConfigCatalogRoute
   '/api/models-config/discover': typeof ApiModelsConfigDiscoverRoute
   '/api/models-config/test': typeof ApiModelsConfigTestRoute
+  '/api/models/scope': typeof ApiModelsScopeRoute
   '/api/sessions/$id': typeof ApiSessionsIdRouteWithChildren
   '/api/skills/check': typeof ApiSkillsCheckRoute
   '/api/skills/install': typeof ApiSkillsInstallRoute
@@ -481,6 +499,7 @@ export interface FileRouteTypes {
     | '/api/default-cwd'
     | '/api/file-index'
     | '/api/home'
+    | '/api/image-resize'
     | '/api/models'
     | '/api/models-config'
     | '/api/plugins'
@@ -506,6 +525,7 @@ export interface FileRouteTypes {
     | '/api/models-config/catalog'
     | '/api/models-config/discover'
     | '/api/models-config/test'
+    | '/api/models/scope'
     | '/api/sessions/$id'
     | '/api/skills/check'
     | '/api/skills/install'
@@ -533,6 +553,7 @@ export interface FileRouteTypes {
     | '/api/default-cwd'
     | '/api/file-index'
     | '/api/home'
+    | '/api/image-resize'
     | '/api/models'
     | '/api/models-config'
     | '/api/plugins'
@@ -558,6 +579,7 @@ export interface FileRouteTypes {
     | '/api/models-config/catalog'
     | '/api/models-config/discover'
     | '/api/models-config/test'
+    | '/api/models/scope'
     | '/api/sessions/$id'
     | '/api/skills/check'
     | '/api/skills/install'
@@ -585,6 +607,7 @@ export interface FileRouteTypes {
     | '/api/default-cwd'
     | '/api/file-index'
     | '/api/home'
+    | '/api/image-resize'
     | '/api/models'
     | '/api/models-config'
     | '/api/plugins'
@@ -610,6 +633,7 @@ export interface FileRouteTypes {
     | '/api/models-config/catalog'
     | '/api/models-config/discover'
     | '/api/models-config/test'
+    | '/api/models/scope'
     | '/api/sessions/$id'
     | '/api/skills/check'
     | '/api/skills/install'
@@ -638,7 +662,8 @@ export interface RootRouteChildren {
   ApiDefaultCwdRoute: typeof ApiDefaultCwdRoute
   ApiFileIndexRoute: typeof ApiFileIndexRoute
   ApiHomeRoute: typeof ApiHomeRoute
-  ApiModelsRoute: typeof ApiModelsRoute
+  ApiImageResizeRoute: typeof ApiImageResizeRoute
+  ApiModelsRoute: typeof ApiModelsRouteWithChildren
   ApiModelsConfigRoute: typeof ApiModelsConfigRouteWithChildren
   ApiPluginsRoute: typeof ApiPluginsRoute
   ApiProjectTrustRoute: typeof ApiProjectTrustRoute
@@ -708,6 +733,13 @@ declare module '@tanstack/react-router' {
       path: '/api/home'
       fullPath: '/api/home'
       preLoaderRoute: typeof ApiHomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/image-resize': {
+      id: '/api/image-resize'
+      path: '/api/image-resize'
+      fullPath: '/api/image-resize'
+      preLoaderRoute: typeof ApiImageResizeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/models': {
@@ -885,6 +917,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiModelsConfigTestRouteImport
       parentRoute: typeof ApiModelsConfigRoute
     }
+    '/api/models/scope': {
+      id: '/api/models/scope'
+      path: '/scope'
+      fullPath: '/api/models/scope'
+      preLoaderRoute: typeof ApiModelsScopeRouteImport
+      parentRoute: typeof ApiModelsRoute
+    }
     '/api/sessions/$id': {
       id: '/api/sessions/$id'
       path: '/$id'
@@ -1021,6 +1060,18 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ApiModelsRouteChildren {
+  ApiModelsScopeRoute: typeof ApiModelsScopeRoute
+}
+
+const ApiModelsRouteChildren: ApiModelsRouteChildren = {
+  ApiModelsScopeRoute: ApiModelsScopeRoute,
+}
+
+const ApiModelsRouteWithChildren = ApiModelsRoute._addFileChildren(
+  ApiModelsRouteChildren,
+)
+
 interface ApiModelsConfigRouteChildren {
   ApiModelsConfigCatalogRoute: typeof ApiModelsConfigCatalogRoute
   ApiModelsConfigDiscoverRoute: typeof ApiModelsConfigDiscoverRoute
@@ -1126,7 +1177,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiDefaultCwdRoute: ApiDefaultCwdRoute,
   ApiFileIndexRoute: ApiFileIndexRoute,
   ApiHomeRoute: ApiHomeRoute,
-  ApiModelsRoute: ApiModelsRoute,
+  ApiImageResizeRoute: ApiImageResizeRoute,
+  ApiModelsRoute: ApiModelsRouteWithChildren,
   ApiModelsConfigRoute: ApiModelsConfigRouteWithChildren,
   ApiPluginsRoute: ApiPluginsRoute,
   ApiProjectTrustRoute: ApiProjectTrustRoute,

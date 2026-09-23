@@ -37,6 +37,7 @@ import {
 } from "./subagents";
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
+import { closeAllAgentEventStreams } from "./agent-event-stream";
 import { createReasoningRouterExtension } from "./reasoning-router";
 import { createSystemPromptOverride, createSystemPromptOverrideExtension, type SystemPromptOverride } from "./system-prompt-override";
 import { isSessionLeaseActive, leaseExpiresAt } from "./session-liveness";
@@ -1742,6 +1743,7 @@ function getRegistry(): Map<string, AgentSessionWrapper> {
     globalThis.__piSessions = new Map();
     const destroy = () => globalThis.__piSessions?.forEach((session) => session.destroy());
     const shutdown = () => {
+      closeAllAgentEventStreams();
       const sessions = Array.from(globalThis.__piSessions?.values() ?? []);
       void Promise.allSettled(sessions.map((session) => session.shutdown()));
     };
@@ -1852,6 +1854,38 @@ export function applyRpcCacheWarmingMode(mode: CacheWarmingMode, cwd?: string): 
     applied += 1;
   }
   if (applied === 0) SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).setCacheWarmingMode(mode);
+  return applied;
+}
+
+/** Global image auto-resize. Project overrides stay out of this switch. */
+export function getRpcImageAutoResize(cwd?: string): boolean {
+  const registry = globalThis.__piSessions;
+  for (const wrapper of registry?.values() ?? []) {
+    if (!wrapper.isAlive()) continue;
+    return wrapper.inner.settingsManager.getGlobalSettings().images?.autoResize ?? true;
+  }
+  return SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).getGlobalSettings().images?.autoResize ?? true;
+}
+
+/**
+ * Persist the global toggle. Idle sessions reload so the `read` tool, which
+ * snapshots the flag at build time, picks it up. A running session is left
+ * alone and keeps the previous tool until it starts again.
+ */
+export async function applyRpcImageAutoResize(enabled: boolean, cwd?: string): Promise<number> {
+  let applied = 0;
+  const reloads: Promise<void>[] = [];
+  for (const wrapper of getRegistry().values()) {
+    if (!wrapper.isAlive()) continue;
+    wrapper.inner.settingsManager.setImageAutoResize(enabled);
+    applied += 1;
+    if (wrapper.isRunning()) continue;
+    reloads.push(Promise.resolve(wrapper.inner.reload()).catch((error: unknown) => {
+      console.error(`[pi-web] failed to reload session ${wrapper.sessionId} after image resize change:`, error);
+    }));
+  }
+  if (applied === 0) SettingsManager.create(cwd ?? process.cwd(), getAgentDir()).setImageAutoResize(enabled);
+  await Promise.all(reloads);
   return applied;
 }
 

@@ -26,6 +26,11 @@ test("settings embeds the model, skill, plugin, and remote modules", () => {
   assert.doesNotMatch(settings, /id: "project"/);
 });
 
+test("model scope changes refresh the title-model list as well as the picker", () => {
+  assert.match(settings, /const handleModelScopeChanged = useCallback\(\(\) => \{\s*onModelsChanged\(\);[\s\S]*?void loadTitleSettings\(\);/);
+  assert.match(settings, /<ModelScopePanel cwd=\{cwd\} onChanged=\{handleModelScopeChanged\} \/>/);
+});
+
 test("remote access follows plugins and does not require a project", () => {
   assert.match(settings, /id: "plugins"[\s\S]*id: "remote"/);
   assert.match(settings, /id: "remote", label: t\("remote\.nav"\), disabled: false/);
@@ -125,6 +130,8 @@ test("cache warming is a pi setting owned by the general section", () => {
   assert.match(settings, /fetch\(`\/api\/cache-warming\$\{query\}`\)/);
   assert.match(settings, /body: JSON\.stringify\(\{ mode, cwd: cwd \?\? undefined \}\)/);
   assert.match(settings, /aria-checked=\{cacheWarmingMode === mode\}/);
+  assert.match(settings, /fetch\(`\/api\/image-resize\$\{query\}`\)/);
+  assert.match(settings, /aria-checked=\{imageAutoResize === true\}/);
   assert.match(settings, /CACHE_WARMING_OPTIONS: CacheWarmingMode\[\] = \["off", "streaming", "idle"\]/);
 });
 

@@ -4,7 +4,7 @@ import test from "node:test";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, { interopDefault: true });
-const { filterProjectSessions } = await jiti.import("../lib/codex-sidebar-search.ts");
+const { filterProjectSessions, sidebarSessionTitle } = await jiti.import("../lib/codex-sidebar-search.ts");
 
 const sidebar = await readFile(new URL("./CodexSidebar.tsx", import.meta.url), "utf8");
 const shell = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
@@ -15,6 +15,13 @@ test("AppShell renders the Codex project sidebar instead of the legacy sidebar",
   assert.match(shell, /import \{ CodexSidebar \} from "\.\/CodexSidebar"/);
   assert.match(shell, /<CodexSidebar/);
   assert.doesNotMatch(shell, /<SessionSidebar/);
+});
+
+test("sidebar title drops markdown links", () => {
+  assert.equal(sidebarSessionTitle({
+    id: "s1",
+    firstMessage: "[Release: Pi 0.86.0 · News · Pi](https://pi.dev/news/releases/0.86.0)",
+  }), "Release: Pi 0.86.0 · News · Pi");
 });
 
 test("sidebar shows a skeleton while sessions load", () => {
@@ -123,7 +130,7 @@ test("preserves desktop session context menus and styled dirty-worktree confirma
 
 test("session overflow menu portals, dismisses, and archives locally", () => {
   assert.match(sidebar, /readArchivedSessionIds\(\)/);
-  assert.match(sidebar, /!archivedIds\.has\(session\.id\)/);
+  assert.match(sidebar, /archivedIds\.has\(session\.id\) \|\| seen\.has\(session\.id\)/);
   assert.match(sidebar, /sidebar\.archiveSession/);
   assert.match(sidebar, /codex-project-menu-portal/);
   assert.match(sidebar, /document\.addEventListener\("mousedown", onPointerDown\)/);

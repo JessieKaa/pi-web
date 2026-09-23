@@ -45,3 +45,24 @@ export function userMessageKey(message: Partial<AgentMessage>): string {
     images: content.map(imageSignature).filter(Boolean),
   });
 }
+
+/** Keep one optimistic user bubble when a system message lands before its echo. */
+export function absorbOptimisticUserMessage<T extends AgentMessage>(
+  prev: T[],
+  delivered: T,
+  optimisticKey: string | null,
+): T[] {
+  if (optimisticKey) {
+    for (let i = prev.length - 1; i >= 0; i--) {
+      const item = prev[i];
+      if (!item || item.role !== "user" || userMessageKey(item) !== optimisticKey) continue;
+      const blocked = prev.slice(i + 1).some((message) => message?.role === "user" || message?.role === "assistant");
+      if (blocked) break;
+      if (optimisticKey === userMessageKey(delivered)) return prev;
+      const next = prev.slice();
+      next[i] = delivered;
+      return next;
+    }
+  }
+  return [...prev, delivered];
+}

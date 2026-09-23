@@ -24,6 +24,51 @@ import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { parseSessionWindowParams, sliceSessionContext } from "@/lib/session-window";
 import type { SessionInfo } from "@/lib/types";
 
+type LiveMetadata = {
+  revision: string;
+  tree: ReturnType<SessionManager["getTree"]>;
+  totalActiveMs: number;
+  messageCount: number;
+  firstMessage: string;
+};
+
+const liveMetadataCache = new WeakMap<SessionManager, LiveMetadata>();
+
+function getLiveMetadata(manager: SessionManager, filePath: string): LiveMetadata {
+  // SDK entries are append-only, but getEntries() filters the whole file and
+  // getTree() rebuilds the entire tree. Cache that work while JSONL is unchanged.
+  let revision: string | undefined;
+  try {
+    const stat = statSync(filePath);
+    revision = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  } catch {
+    // A concurrent rewrite can remove the old path after the window was read.
+    // Live metadata is still available, but this response should not be cached.
+  }
+  const cached = liveMetadataCache.get(manager);
+  if (revision && cached?.revision === revision) return cached;
+
+  const entries = manager.getEntries();
+  const firstUser = entries.find((entry) => entry.type === "message" && entry.message.role === "user");
+  const content = firstUser?.type === "message" && firstUser.message.role === "user"
+    ? firstUser.message.content
+    : undefined;
+  const firstMessage = (typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content.find((block) => block.type === "text")?.text ?? ""
+      : "").slice(0, 200) || "(no messages)";
+  const metadata = {
+    revision: revision ?? "",
+    tree: projectTreeForResponse(manager.getTree()),
+    totalActiveMs: computeSessionTotalActiveMs(entries),
+    messageCount: entries.filter((entry) => entry.type === "message").length,
+    firstMessage,
+  };
+  if (revision) liveMetadataCache.set(manager, metadata);
+  return metadata;
+}
+
 function isEnoent(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && (error as { code: unknown }).code === "ENOENT");
 }
@@ -75,7 +120,14 @@ export async function GET(
   try {
     const rpc = getRpcSession(id);
     const liveRpc = rpc?.isAlive() ? rpc : undefined;
-    const resolvedPath = liveRpc ? null : await resolveSessionPath(id);
+    const liveFile = liveRpc
+      ? (liveRpc.sessionFile || liveRpc.inner.sessionManager.getSessionFile() || "")
+      : "";
+    const resolvedPath = liveFile && existsSync(liveFile)
+      ? liveFile
+      : liveRpc
+        ? null
+        : await resolveSessionPath(id);
     if (!liveRpc && !resolvedPath) {
       return Response.json({ error: "Session not found" }, { status: 404 });
     }
@@ -88,59 +140,79 @@ export async function GET(
     const historyMode = searchParams.get("history") === "transcript" ? "transcript" : "context";
     const defer = { deferThinking, deferToolResultImages, deferToolResults };
 
-    if (!liveRpc) {
-      const filePath = resolvedPath!;
-      const window = historyMode === "transcript"
-        ? readSessionTranscriptWindow(filePath, { limit, before, leafId: leafIdParam, ...defer })
-        : readSessionWindow(filePath, { limit, before, leafId: leafIdParam, ...defer });
-      if ("historyChanged" in window && window.historyChanged) {
-        return Response.json({ error: "Transcript changed; reload history", code: "history_changed" }, { status: 409 });
+    // A live session may be viewing a branch other than the last JSONL entry.
+    // Only ask for its leaf when a wrapper exists; idle reads remain file-only.
+    const selectedLeafId = leafIdParam ?? liveRpc?.inner.sessionManager.getLeafId?.();
+    if (resolvedPath) {
+      const filePath = resolvedPath;
+      let window: ReturnType<typeof readSessionWindow> | ReturnType<typeof readSessionTranscriptWindow> | undefined;
+      try {
+        window = historyMode === "transcript"
+          ? readSessionTranscriptWindow(filePath, { limit, before, leafId: selectedLeafId, ...defer })
+          : readSessionWindow(filePath, { limit, before, leafId: selectedLeafId, ...defer });
+      } catch (error) {
+        // A live file can disappear during a session rewrite. Its in-memory
+        // entries remain authoritative until the replacement is readable.
+        if (!liveRpc) throw error;
       }
-      const header = readSessionHeader(filePath);
-      const listInfo = readCachedSessionInfo(filePath);
-      let modified = header?.timestamp ?? new Date().toISOString();
-      try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }
-      const parentSessionId = header?.parentSession
-        ? await resolveSessionIdByPath(header.parentSession)
-        : undefined;
-      const info = header ? {
-        path: filePath,
-        id: header.id,
-        cwd: header.cwd ?? "",
-        name: listInfo?.name,
-        created: header.timestamp,
-        modified: listInfo?.modified ?? modified,
-        messageCount: listInfo?.messageCount != null
-          ? listInfo.messageCount
-          : (window.hasMore ? null : window.context.messages.length),
-        firstMessage: listInfo?.firstMessage ?? "(no messages)",
-        parentSessionId,
-        transient: false,
-      } : null;
-      return jsonResponse(req, {
-        sessionId: id,
-        filePath,
-        info,
-        leafId: window.leafId,
-        tree: window.tree,
-        context: window.context,
-        totalActiveMs: window.totalActiveMs,
-        hasMore: window.hasMore,
-        historyMode,
-      });
+      // A live leaf or cursor may not have reached disk yet. Use the in-memory
+      // path in that case, before declaring the transcript rewritten.
+      const missingLiveLeaf = liveRpc && selectedLeafId != null && window?.leafId !== selectedLeafId;
+      if (window && (!liveRpc || (!missingLiveLeaf && window.context.entryIds.length > 0 && !("historyChanged" in window && window.historyChanged)))) {
+        if ("historyChanged" in window && window.historyChanged) {
+          return Response.json({ error: "Transcript changed; reload history", code: "history_changed" }, { status: 409 });
+        }
+        const header = readSessionHeader(filePath);
+        const listInfo = readCachedSessionInfo(filePath);
+        const liveMetadata = liveRpc ? getLiveMetadata(liveRpc.inner.sessionManager, filePath) : undefined;
+        let modified = header?.timestamp ?? new Date().toISOString();
+        try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }
+        const parentSessionId = header?.parentSession
+          ? await resolveSessionIdByPath(header.parentSession)
+          : undefined;
+        const info = header ? {
+          path: filePath,
+          id: header.id,
+          cwd: header.cwd ?? "",
+          name: liveRpc?.inner.sessionManager.getSessionName() || listInfo?.name,
+          created: header.timestamp,
+          modified: listInfo?.modified ?? modified,
+          messageCount: liveMetadata?.messageCount
+            ?? listInfo?.messageCount
+            ?? (window.hasMore ? null : window.context.messages.length),
+          firstMessage: liveMetadata?.firstMessage ?? listInfo?.firstMessage ?? "(no messages)",
+          parentSessionId,
+          transient: false,
+        } : null;
+        return jsonResponse(req, {
+          sessionId: id,
+          filePath,
+          info,
+          leafId: window.leafId,
+          // Window messages from disk while retaining complete cached live metadata.
+          tree: liveMetadata?.tree ?? window.tree,
+          context: window.context,
+          totalActiveMs: liveMetadata?.totalActiveMs ?? window.totalActiveMs,
+          hasMore: window.hasMore,
+          historyMode,
+        });
+      }
     }
 
+    if (!liveRpc) return Response.json({ error: "Session not found" }, { status: 404 });
     const sm = liveRpc.inner.sessionManager;
     const filePath = liveRpc.sessionFile || sm.getSessionFile() || "";
     const entries = sm.getEntries();
-    const leafId = leafIdParam || sm.getLeafId();
+    const leafId = selectedLeafId ?? sm.getLeafId();
     const full = historyMode === "transcript"
       ? buildSessionTranscript(entries as never, leafId, defer)
       : buildSessionContext(entries as never, leafId, defer);
     if (historyMode === "transcript" && before && !full.entryIds.includes(before)) {
       return Response.json({ error: "Transcript changed; reload history", code: "history_changed" }, { status: 409 });
     }
-    const { context, hasMore } = sliceSessionContext(full, { limit, before });
+    const { context, hasMore } = sliceSessionContext(full, {
+      limit, before, mode: historyMode === "transcript" ? "entries" : "visible",
+    });
     const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();
     try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }

@@ -276,6 +276,23 @@ export interface SessionInfoEntry extends SessionEntryBase {
   name?: string;
 }
 
+/** Pi 0.87: changes what the model sees without rewriting the raw entry or the chat transcript. */
+export interface ContextEditEntry extends SessionEntryBase {
+  type: "context_edit";
+  targetId: string;
+  replacement: { content: string | readonly unknown[] } | null;
+}
+
+/** Pi 0.87: side-channel usage such as cache warming. Not a chat message. */
+export interface UsageEntry extends SessionEntryBase {
+  type: "usage";
+  kind: string;
+  provider: string;
+  model: string;
+  usage: unknown;
+  note?: string;
+}
+
 export type SessionEntry =
   | SessionMessageEntry
   | ThinkingLevelChangeEntry
@@ -284,6 +301,8 @@ export type SessionEntry =
   | BranchSummaryEntry
   | CustomEntry
   | CustomMessageEntry
+  | ContextEditEntry
+  | UsageEntry
   | LabelEntry
   | SessionInfoEntry;
 

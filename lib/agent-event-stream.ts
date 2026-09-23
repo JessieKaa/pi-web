@@ -21,6 +21,13 @@ export interface AgentEventStreamOptions {
 }
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
+const openEventStreams = new Set<() => void>();
+
+/** Drop live SSE responses during process shutdown so a restart does not leave them hanging. */
+export function closeAllAgentEventStreams(): void {
+  for (const close of openEventStreams) close();
+  openEventStreams.clear();
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -50,9 +57,11 @@ export function createAgentEventStream(
       let abortHandler: (() => void) | null = null;
       let leasedSession: AgentEventStreamSession | undefined;
 
+      let closeStream: (() => void) | null = null;
       const cleanup = (closeController: boolean) => {
         if (closed) return;
         closed = true;
+        if (closeStream) openEventStreams.delete(closeStream);
         if (heartbeat !== null) clearInterval(heartbeat);
         unsubscribe?.();
         unsubscribe = null;
@@ -62,6 +71,8 @@ export function createAgentEventStream(
         }
       };
       cancelStream = cleanup;
+      closeStream = () => cleanup(true);
+      openEventStreams.add(closeStream);
 
       const enqueueText = (text: string) => {
         if (closed) return;
