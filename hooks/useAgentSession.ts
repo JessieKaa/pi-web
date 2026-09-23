@@ -31,7 +31,7 @@ import {
   getLiveFollowAttached,
 } from "@/lib/chat-lazy-load";
 import { SESSION_MESSAGE_WINDOW, historyItemKey, mergeWindowedHistory } from "@/lib/session-window";
-import { highestThinkingLevel } from "@/lib/thinking-level";
+import { highestThinkingLevel, resolveSessionThinkingLevel, THINKING_LEVEL_RANK } from "@/lib/thinking-level";
 import {
   INITIAL_STREAMING_STATE,
   streamReducer,
@@ -70,6 +70,12 @@ interface CompactCommandResult {
 interface LastAssistantTextResponse {
   text?: string;
 }
+
+type NavigateTreeResult = {
+  cancelled?: boolean;
+  thinkingLevel?: ThinkingLevelOption;
+  model?: SessionData["context"]["model"];
+};
 
 type AgentStateResponse = {
   contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null;
@@ -370,6 +376,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const activeLeafIdRef = useRef<string | null>(null);
   const messagesRef = useRef<AgentMessage[]>([]);
   const loadSessionGenRef = useRef(0);
+  const contextLoadGenRef = useRef(0);
+  const thinkingSelectionGenRef = useRef(0);
+  const thinkingUserChangeGenRef = useRef(0);
+  const thinkingSourceRef = useRef<"pending" | "fallback" | "persisted" | "live" | "promoted" | "user">("pending");
+  const pendingBranchActivationRef = useRef<{ sid: string; leafId: string } | null>(null);
+  const pendingBranchSelectionRef = useRef<Promise<boolean> | null>(null);
+  const pendingBranchSendRef = useRef<Promise<boolean> | null>(null);
   entryIdsRef.current = entryIds;
   historyHasMoreRef.current = historyHasMore;
   activeLeafIdRef.current = activeLeafId;
@@ -421,6 +434,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const newSessionPromotedRef = useRef(false);
   const newSessionModelOverrideRef = useRef<SelectedModel | null>(null);
   const thinkingLevelOverrideRef = useRef<Exclude<ThinkingLevelOption, "auto"> | null>(null);
+  // Explicit choices can match the runtime default and leave no JSONL change entry.
+  // Keep them for this tab until a persisted change or live state takes precedence.
+  const explicitSessionThinkingRef = useRef(new Map<string, ThinkingLevelOption>());
+  const modelLoadGenRef = useRef(0);
+  const modelCwdRef = useRef(newSessionCwd ?? session?.cwd ?? "");
+  modelCwdRef.current = newSessionCwd ?? session?.cwd ?? "";
   const modelThinkingLevelsRef = useRef<Record<string, string[]>>({});
   const modelThinkingLevelPinsRef = useRef<Record<string, string>>({});
   const initialThinkingLevelsRef = useRef<Record<string, string>>({});
@@ -583,6 +602,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
     const gen = ++loadSessionGenRef.current;
+    const selectionGen = thinkingSelectionGenRef.current;
+    const userChangeGen = thinkingUserChangeGenRef.current;
+    // A newer transcript load supersedes any in-flight leaf-only response.
+    contextLoadGenRef.current += 1;
     let messagesLoaded = false;
     try {
       if (showLoading) setLoading(true);
@@ -608,7 +631,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as SessionData;
-      if (gen !== loadSessionGenRef.current || sessionIdRef.current !== sid) return null;
+      if (gen !== loadSessionGenRef.current || selectionGen !== thinkingSelectionGenRef.current || sessionIdRef.current !== sid) return null;
       textDeltaBatcher.flush();
       commitLiveAssistant();
       const incomingIds = d.context.entryIds ?? [];
@@ -626,16 +649,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setCurrentModelOverride((current) => modelSwitchPendingRef.current ? current : null);
       setError(null);
       sessionModelRef.current = d.context.model;
-      if (d.context.thinkingLevel) {
-        setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
-      } else if (thinkingLevelOverrideRef.current === null && d.context.model) {
-        const next = desiredThinkingLevel(
-          d.context.model.provider,
-          d.context.model.modelId,
-          modelThinkingLevelsRef.current,
-          modelThinkingLevelPinsRef.current,
-        );
-        if (next !== "auto") setThinkingLevel(next);
+      if (userChangeGen === thinkingUserChangeGenRef.current && thinkingSourceRef.current !== "user" && thinkingSourceRef.current !== "live") {
+        const persisted = d.context.thinkingLevel;
+        const promoted = explicitSessionThinkingRef.current.get(sid);
+        const fallback = d.context.model
+          ? desiredThinkingLevel(d.context.model.provider, d.context.model.modelId, modelThinkingLevelsRef.current, modelThinkingLevelPinsRef.current)
+          : "auto";
+        const next = resolveSessionThinkingLevel({ persisted, promoted, fallback }) as ThinkingLevelOption;
+        thinkingSourceRef.current = persisted ? "persisted" : promoted ? "promoted" : "fallback";
+        setThinkingLevel(next);
       }
 
       messagesLoaded = true;
@@ -646,13 +668,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
         if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
         const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
-        if (gen !== loadSessionGenRef.current || sessionIdRef.current !== sid) return null;
+        if (gen !== loadSessionGenRef.current || selectionGen !== thinkingSelectionGenRef.current || sessionIdRef.current !== sid) return null;
 
         const liveState = agentState.state;
         if (liveState) {
           if (liveState.contextUsage !== undefined) setContextUsage(liveState.contextUsage ?? null);
           if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt ?? null);
-          if (liveState.thinkingLevel !== undefined) setThinkingLevel((liveState.thinkingLevel as ThinkingLevelOption) ?? "auto");
+          if (liveState.thinkingLevel !== undefined && userChangeGen === thinkingUserChangeGenRef.current && thinkingSourceRef.current !== "user") {
+            thinkingSourceRef.current = "live";
+            setThinkingLevel((liveState.thinkingLevel as ThinkingLevelOption) ?? "auto");
+          }
           if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
           if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
           if (liveState.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(liveState.queuedMessages));
@@ -686,7 +711,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       .catch(() => {});
   }, []);
 
-  const loadContext = useCallback(async (sid: string, leafId: string | null) => {
+  const loadContext = useCallback(async (
+    sid: string, leafId: string | null, liveLevel?: ThinkingLevelOption,
+    liveModel?: SessionData["context"]["model"],
+  ): Promise<boolean> => {
+    const contextGen = ++contextLoadGenRef.current;
+    const selectionGen = thinkingSelectionGenRef.current;
+    const userChangeGen = thinkingUserChangeGenRef.current;
     try {
       const params = new URLSearchParams({
         deferThinking: "1",
@@ -699,12 +730,36 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const url = `/api/sessions/${encodeURIComponent(sid)}/context?${params}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[] }; hasMore?: boolean };
+      const d = await res.json() as { context: SessionData["context"]; hasMore?: boolean };
+      if (sessionIdRef.current !== sid || selectionGen !== thinkingSelectionGenRef.current || contextGen !== contextLoadGenRef.current) return false;
       replaceMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
       setHistoryHasMore(Boolean(d.hasMore));
+      const selectedModel = liveModel !== undefined
+        ? liveModel
+        : liveLevel === undefined ? d.context.model : sessionModelRef.current;
+      sessionModelRef.current = selectedModel;
+      setData((current) => current?.sessionId === sid
+        ? { ...current, context: {
+          ...current.context,
+          model: selectedModel,
+          thinkingLevel: d.context.thinkingLevel,
+        } }
+        : current);
+      const persisted = d.context.thinkingLevel;
+      const promoted = explicitSessionThinkingRef.current.get(sid);
+      const fallbackModel = selectedModel;
+      const fallback = fallbackModel
+        ? desiredThinkingLevel(fallbackModel.provider, fallbackModel.modelId, modelThinkingLevelsRef.current, modelThinkingLevelPinsRef.current)
+        : "auto";
+      if (userChangeGen === thinkingUserChangeGenRef.current) {
+        thinkingSourceRef.current = liveLevel !== undefined ? "live" : persisted ? "persisted" : promoted ? "promoted" : "fallback";
+        setThinkingLevel(resolveSessionThinkingLevel({ live: liveLevel, persisted, promoted, fallback }) as ThinkingLevelOption);
+      }
+      return true;
     } catch (e) {
       console.error("Failed to load context:", e);
+      return false;
     }
   }, []);
 
@@ -803,6 +858,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // enabledModels scope atomically with AgentSession construction.
       const selectedModel = newSessionModelOverrideRef.current;
       const selectedThinkingLevel = thinkingLevelOverrideRef.current;
+      const selectionGen = thinkingSelectionGenRef.current;
       if (selectedModel) setPendingModel(selectedModel);
       const explicitPreset = getPreferredToolPreset();
       const toolNames = explicitPreset ? getToolNamesForPreset(explicitPreset) : undefined;
@@ -826,7 +882,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         thinkingLevel?: ThinkingLevelOption;
       };
       const realId = result.sessionId;
+      if (thinkingSelectionGenRef.current !== selectionGen) return null;
       sessionIdRef.current = realId;
+      if (selectedThinkingLevel && thinkingLevelOverrideRef.current === selectedThinkingLevel) {
+        explicitSessionThinkingRef.current.set(realId, result.thinkingLevel ?? selectedThinkingLevel);
+      }
       if (result.model && newSessionModelOverrideRef.current === selectedModel) {
         setPendingModel(result.model);
         if (!selectedModel) setNewSessionDefaultModel(result.model);
@@ -835,6 +895,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         result.thinkingLevel
         && thinkingLevelOverrideRef.current === selectedThinkingLevel
       ) {
+        thinkingSourceRef.current = "live";
         setThinkingLevel(result.thinkingLevel);
       }
       return realId;
@@ -1120,14 +1181,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const finishPromptWithoutStream = useCallback(async (sid: string | null = sessionIdRef.current, runId = promptRunIdRef.current) => {
     // Bail out before loadSession too: a stale finish for a previous run
     // must not overwrite the messages of the run currently streaming.
-    if (promptRunIdRef.current !== runId) return;
+    if (promptRunIdRef.current !== runId || sid !== sessionIdRef.current) return;
     try {
       if (sid) {
         await loadSession(sid);
         refreshContextUsage(sid);
       }
     } finally {
-      if (promptRunIdRef.current !== runId) return;
+      if (promptRunIdRef.current !== runId || sid !== sessionIdRef.current) return;
       const promptWasPending = rpcPromptPendingRef.current;
       const agentWasActive = sdkAgentActiveRef.current;
       rpcPromptPendingRef.current = false;
@@ -1148,11 +1209,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const startedAt = Date.now();
 
     while (agentRunningRef.current && Date.now() - startedAt < PROMPT_SETTLE_MAX_MS) {
-      if (runId !== undefined && promptRunIdRef.current !== runId) return;
+      if (sessionIdRef.current !== sid || (runId !== undefined && promptRunIdRef.current !== runId)) return;
       try {
         const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
         if (res.ok) {
           const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
+          if (sessionIdRef.current !== sid) return;
           const state = data.state;
           if (!data.running || !state || (!state.isStreaming && !state.isPromptRunning)) {
             await finishPromptWithoutStream(sid, runId);
@@ -1517,6 +1579,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
       }
+      case "thinking_level_changed":
+        if (typeof event.level === "string" && THINKING_LEVEL_RANK.includes(event.level as (typeof THINKING_LEVEL_RANK)[number])) {
+          thinkingSourceRef.current = "live";
+          setThinkingLevel(event.level as ThinkingLevelOption);
+        }
+        break;
       case "queue_update":
         setQueuedMessages({
           steering: [...((event.steering as string[] | undefined) ?? [])],
@@ -1565,6 +1633,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
+    if (pendingBranchSelectionRef.current) {
+      const pendingSelection = pendingBranchSelectionRef.current;
+      if (pendingBranchSendRef.current === pendingSelection) {
+        restoreSubmission(message, images, composerDraftKey);
+        return;
+      }
+      pendingBranchSendRef.current = pendingSelection;
+      try {
+        const ready = await pendingSelection;
+        if (!ready || (session && sessionIdRef.current !== session.id)) {
+          restoreSubmission(message, images, composerDraftKey);
+          addNotice({ type: "error", message: "Failed to switch branch before sending" });
+          return;
+        }
+      } finally {
+        if (pendingBranchSendRef.current === pendingSelection) pendingBranchSendRef.current = null;
+      }
+    }
     if (agentRunningRef.current || bashRunningRef.current) {
       restoreSubmission(message, images, composerDraftKey);
       return;
@@ -1584,6 +1670,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
 
     const promptRunId = promptRunIdRef.current + 1;
+    const submissionSelectionGen = thinkingSelectionGenRef.current;
     cancelEventStreamGrace();
     rpcPromptPendingRef.current = true;
 
@@ -1619,6 +1706,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const sid = existingSid ?? await ensureNewSession();
 
         if (!sid) throw new Error("Unable to create a session for the prompt");
+        if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== submissionSelectionGen) {
+          throw new Error("Session changed before the prompt started");
+        }
         sentSessionId = sid;
         if (selectedModel) {
           setPendingModel(selectedModel);
@@ -1626,10 +1716,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             const result = await sendAgentCommand<{ thinkingLevel?: ThinkingLevelOption }>(sid, {
               type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId,
             });
+            if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== submissionSelectionGen) {
+              throw new Error("Session changed before the prompt started");
+            }
             const selectedLevel = thinkingLevelOverrideRef.current
               ?? (modelThinkingLevelPinsRef.current[`${selectedModel.provider}/${selectedModel.modelId}`] as ThinkingLevelOption | undefined);
             if (selectedLevel && selectedLevel !== result.thinkingLevel) {
               const applied = await sendAgentCommand<{ level?: ThinkingLevelOption }>(sid, { type: "set_thinking_level", level: selectedLevel });
+              if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== submissionSelectionGen) {
+                throw new Error("Session changed before the prompt started");
+              }
               setThinkingLevel(applied?.level ?? selectedLevel);
             } else if (result.thinkingLevel !== undefined) {
               setThinkingLevel(result.thinkingLevel);
@@ -1637,12 +1733,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           }
         }
         await ensureActiveRuntime(sid, true);
+        if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== submissionSelectionGen) {
+          throw new Error("Session changed before the prompt started");
+        }
         promptRequestStarted = true;
         const promptResult = await sendAgentCommand<{ promptGeneration?: number } | null>(sid, {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
         });
+        if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== submissionSelectionGen) return;
         if (typeof promptResult?.promptGeneration === "number") {
           lastPromptGenerationRef.current = promptResult.promptGeneration;
         }
@@ -1650,12 +1750,34 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       } else if (session) {
         sentSessionId = session.id;
         await ensureActiveRuntime(session.id, true);
+        if (sessionIdRef.current !== session.id) throw new Error("Session changed before the prompt started");
+        const pendingBranch = pendingBranchActivationRef.current;
+        if (pendingBranch?.sid === session.id) {
+          const navigation = await sendAgentCommand<NavigateTreeResult>(session.id, {
+            type: "navigate_tree", targetId: pendingBranch.leafId,
+          });
+          if (navigation?.cancelled) throw new Error("Unable to activate the selected branch");
+          if (sessionIdRef.current !== session.id) throw new Error("Session changed during branch activation");
+          pendingBranchActivationRef.current = null;
+          thinkingUserChangeGenRef.current += 1;
+          if (navigation?.model !== undefined) {
+            sessionModelRef.current = navigation.model;
+            setData((current) => current?.sessionId === session.id
+              ? { ...current, context: { ...current.context, model: navigation.model ?? null } }
+              : current);
+          }
+          if (navigation?.thinkingLevel !== undefined) {
+            thinkingSourceRef.current = "live";
+            setThinkingLevel(navigation.thinkingLevel);
+          }
+        }
         promptRequestStarted = true;
         const promptResult = await sendAgentCommand<{ promptGeneration?: number } | null>(session.id, {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
         });
+        if (sessionIdRef.current !== session.id || thinkingSelectionGenRef.current !== submissionSelectionGen) return;
         if (typeof promptResult?.promptGeneration === "number") {
           lastPromptGenerationRef.current = promptResult.promptGeneration;
         }
@@ -1667,6 +1789,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     } catch (e) {
       console.error("Failed to send message:", e);
+      if (submissionSelectionGen !== thinkingSelectionGenRef.current) {
+        restoreSubmission(message, images, composerDraftKey);
+        return;
+      }
       const definitivelyRejected = !promptRequestStarted || isPromptRejectedError(e);
       // A transport/proxy failure after dispatch is ambiguous: the server may
       // have accepted the prompt before the response was lost. Keep SSE alive
@@ -1774,39 +1900,93 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [ensureActiveRuntime, onSessionForked]);
 
+  const trackBranchSelection = useCallback(async (work: () => Promise<boolean>) => {
+    const pending = work();
+    pendingBranchSelectionRef.current = pending;
+    try {
+      return await pending;
+    } finally {
+      if (pendingBranchSelectionRef.current === pending) pendingBranchSelectionRef.current = null;
+    }
+  }, []);
+
   const handleNavigate = useCallback(async (entryId: string) => {
     if (bashRunningRef.current) return;
-    const sid = sessionIdRef.current;
-    if (!sid) return;
-    try {
-      await ensureActiveRuntime(sid);
-      await sendAgentCommand(sid, { type: "navigate_tree", targetId: entryId });
-    } catch (error) {
-      console.error("Branch switch failed:", error);
+    if (agentRunningRef.current || rpcPromptPendingRef.current || sdkAgentActiveRef.current) {
+      addNotice({ type: "warning", message: "Wait for the current response before switching branches" });
       return;
     }
-    setActiveLeafId(entryId);
-    await loadContext(sid, entryId);
-  }, [ensureActiveRuntime, loadContext]);
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    const selectionGen = ++thinkingSelectionGenRef.current;
+    loadSessionGenRef.current += 1;
+    contextLoadGenRef.current += 1;
+    await trackBranchSelection(async () => {
+      let liveLevel: ThinkingLevelOption | undefined;
+      let liveModel: SessionData["context"]["model"] | undefined;
+      try {
+        await ensureActiveRuntime(sid);
+        if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) return false;
+        const result = await sendAgentCommand<NavigateTreeResult>(sid, { type: "navigate_tree", targetId: entryId });
+        if (result?.cancelled) return false;
+        liveLevel = result?.thinkingLevel;
+        liveModel = result?.model;
+      } catch (error) {
+        console.error("Branch switch failed:", error);
+        addNotice({ type: "error", message: `Failed to switch branch: ${error instanceof Error ? error.message : String(error)}` });
+        return false;
+      }
+      if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) return false;
+      pendingBranchActivationRef.current = null;
+      activeLeafIdRef.current = entryId;
+      setActiveLeafId(entryId);
+      return loadContext(sid, entryId, liveLevel, liveModel);
+    });
+  }, [addNotice, ensureActiveRuntime, loadContext, trackBranchSelection]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
     if (bashRunningRef.current) return;
+    if (agentRunningRef.current || rpcPromptPendingRef.current || sdkAgentActiveRef.current) {
+      addNotice({ type: "warning", message: "Wait for the current response before switching branches" });
+      return;
+    }
     const sid = sessionIdRef.current;
     if (!sid) return;
-    if (leafId && sessionRunningRef.current) {
-      try {
-        await ensureActiveRuntime(sid);
-        await sendAgentCommand(sid, { type: "navigate_tree", targetId: leafId });
-      } catch (error) {
-        console.error("Branch switch failed:", error);
-        return;
+    const selectionGen = ++thinkingSelectionGenRef.current;
+    loadSessionGenRef.current += 1;
+    contextLoadGenRef.current += 1;
+    await trackBranchSelection(async () => {
+      let liveLevel: ThinkingLevelOption | undefined;
+      let liveModel: SessionData["context"]["model"] | undefined;
+      if (leafId && sessionRunningRef.current) {
+        try {
+          await ensureActiveRuntime(sid);
+          if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) return false;
+          const result = await sendAgentCommand<NavigateTreeResult>(sid, { type: "navigate_tree", targetId: leafId });
+          if (result?.cancelled) return false;
+          liveLevel = result?.thinkingLevel;
+          liveModel = result?.model;
+        } catch (error) {
+          console.error("Branch switch failed:", error);
+          addNotice({ type: "error", message: `Failed to switch branch: ${error instanceof Error ? error.message : String(error)}` });
+          return false;
+        }
       }
-    }
-    setActiveLeafId(leafId);
-    await loadContext(sid, leafId);
-  }, [ensureActiveRuntime, loadContext]);
+      if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) return false;
+      // Cold history browsing stays read-only; activate the selected leaf only
+      // when the user actually sends a prompt and a runtime is already needed.
+      pendingBranchActivationRef.current = leafId && liveLevel === undefined ? { sid, leafId } : null;
+      activeLeafIdRef.current = leafId;
+      setActiveLeafId(leafId);
+      return loadContext(sid, leafId, liveLevel, liveModel);
+    });
+  }, [addNotice, ensureActiveRuntime, loadContext, trackBranchSelection]);
 
-  const applyDesiredThinkingLevel = useCallback(async (sid: string, provider: string, modelId: string, serverLevel?: ThinkingLevelOption) => {
+  const applyDesiredThinkingLevel = useCallback(async (sid: string, provider: string, modelId: string, serverLevel: ThinkingLevelOption | undefined, userGen: number) => {
+    const selectionGen = thinkingSelectionGenRef.current;
+    const stillCurrent = () => sessionIdRef.current === sid
+      && thinkingSelectionGenRef.current === selectionGen
+      && thinkingUserChangeGenRef.current === userGen;
     const desired = desiredThinkingLevel(
       provider,
       modelId,
@@ -1815,16 +1995,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     );
     if (desired !== "auto" && desired !== serverLevel) {
       await ensureActiveRuntime(sid);
+      if (!stillCurrent()) return;
       const applied = await sendAgentCommand<{ level?: ThinkingLevelOption }>(sid, { type: "set_thinking_level", level: desired });
+      if (!stillCurrent()) return;
+      thinkingSourceRef.current = "live";
       setThinkingLevel(applied?.level ?? desired);
       return;
     }
-    if (serverLevel !== undefined) setThinkingLevel(serverLevel);
+    if (serverLevel !== undefined && stillCurrent()) {
+      thinkingSourceRef.current = "live";
+      setThinkingLevel(serverLevel);
+    }
   }, [ensureActiveRuntime]);
 
   const handleModelChange = useCallback(async (provider: string, modelId: string) => {
     if (isNew) {
       const selectedModel = { provider, modelId };
+      const previousModel = newSessionModel;
+      const previousOverride = newSessionModelOverrideRef.current;
+      const previousPendingModel = pendingModel;
       newSessionModelOverrideRef.current = selectedModel;
       setNewSessionModel(selectedModel);
       setPendingModel(selectedModel);
@@ -1836,18 +2025,44 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         return;
       }
+      const selectionGen = thinkingSelectionGenRef.current;
+      let modelApplied = false;
       try {
         await ensureActiveRuntime(sid);
+        if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) return;
         const result = await sendAgentCommand<{ thinkingLevel?: ThinkingLevelOption }>(sid, { type: "set_model", provider, modelId });
+        modelApplied = true;
+        if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) return;
+        sessionModelRef.current = { provider, modelId };
         const selectedLevel = thinkingLevelOverrideRef.current
           ?? (modelThinkingLevelPinsRef.current[`${provider}/${modelId}`] as ThinkingLevelOption | undefined);
         if (selectedLevel && selectedLevel !== result.thinkingLevel) {
           const applied = await sendAgentCommand<{ level?: ThinkingLevelOption }>(sid, { type: "set_thinking_level", level: selectedLevel });
+          if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) return;
+          thinkingSourceRef.current = "live";
           setThinkingLevel(applied?.level ?? selectedLevel);
         } else if (result.thinkingLevel !== undefined) {
+          thinkingSourceRef.current = "live";
           setThinkingLevel(result.thinkingLevel);
         }
       } catch (e) {
+        if (sessionIdRef.current === sid && thinkingSelectionGenRef.current === selectionGen && newSessionModelOverrideRef.current === selectedModel) {
+          if (!modelApplied) {
+            newSessionModelOverrideRef.current = previousOverride;
+            setNewSessionModel(previousModel);
+            setPendingModel(previousPendingModel);
+          } else {
+            try {
+              const state = await sendAgentCommand<{ thinkingLevel?: ThinkingLevelOption }>(sid, { type: "get_state" });
+              if (sessionIdRef.current === sid && thinkingSelectionGenRef.current === selectionGen
+                && newSessionModelOverrideRef.current === selectedModel && state.thinkingLevel !== undefined) {
+                thinkingSourceRef.current = "live";
+                setThinkingLevel(state.thinkingLevel);
+              }
+            } catch { /* The next state reconciliation will read the applied level. */ }
+          }
+          addNotice({ type: "error", message: `Failed to switch model: ${e instanceof Error ? e.message : String(e)}` });
+        }
         console.error("Failed to set model:", e);
       }
       return;
@@ -1856,29 +2071,63 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (!sid || modelSwitchPendingRef.current) return;
     const target = { provider, modelId };
     const previousOverride = currentModelOverride;
+    const previousThinkingLevel = thinkingLevel;
+    loadSessionGenRef.current += 1;
     modelSwitchPendingRef.current = true;
+    const selectionGen = thinkingSelectionGenRef.current;
+    const modelUserGen = ++thinkingUserChangeGenRef.current;
+    thinkingSourceRef.current = "user";
     setCurrentModelOverride(target);
     setModelSwitching(true);
+    const abandonSwitch = () => {
+      if (sessionIdRef.current !== sid) return;
+      setCurrentModelOverride(previousOverride);
+      if (thinkingUserChangeGenRef.current === modelUserGen && thinkingSourceRef.current === "user") {
+        thinkingSourceRef.current = "fallback";
+      }
+    };
     try {
       await ensureActiveRuntime(sid);
+      if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) {
+        abandonSwitch();
+        return;
+      }
       const result = await sendAgentCommand<{ thinkingLevel?: ThinkingLevelOption }>(sid, { type: "set_model", provider, modelId });
-      await applyDesiredThinkingLevel(sid, provider, modelId, result.thinkingLevel);
+      if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) {
+        abandonSwitch();
+        return;
+      }
+      sessionModelRef.current = target;
+      if (thinkingUserChangeGenRef.current === modelUserGen) {
+        await applyDesiredThinkingLevel(sid, provider, modelId, result.thinkingLevel, modelUserGen);
+        if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) {
+          abandonSwitch();
+          return;
+        }
+        if (thinkingUserChangeGenRef.current === modelUserGen) thinkingUserChangeGenRef.current += 1;
+      }
     } catch (e) {
+      if (sessionIdRef.current !== sid || thinkingSelectionGenRef.current !== selectionGen) return;
       console.error("Failed to set model:", e);
       modelSwitchPendingRef.current = false;
+      if (thinkingUserChangeGenRef.current === modelUserGen) {
+        thinkingUserChangeGenRef.current += 1;
+        thinkingSourceRef.current = "fallback";
+        setThinkingLevel(previousThinkingLevel);
+      }
       setCurrentModelOverride(previousOverride);
       addNotice({
         type: "error",
         message: `Failed to switch model: ${e instanceof Error ? e.message : String(e)}`,
       });
       // A failed response can still follow a server-side write (for example, a
-      // dropped connection), so let the session file settle the displayed model.
-      await loadSession(sid);
+      // dropped connection), so let the live state or session file settle both model and thinking.
+      await loadSession(sid, false, true);
     } finally {
       modelSwitchPendingRef.current = false;
       setModelSwitching(false);
     }
-  }, [addNotice, applyDesiredThinkingLevel, currentModelOverride, ensureActiveRuntime, isNew, loadSession, setNewSessionModel]);
+  }, [addNotice, applyDesiredThinkingLevel, currentModelOverride, ensureActiveRuntime, isNew, loadSession, newSessionModel, pendingModel, setNewSessionModel, thinkingLevel]);
 
   const handleCompact = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -1902,10 +2151,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadModels = useCallback(async (signal?: AbortSignal) => {
     const modelCwd = newSessionCwd ?? session?.cwd ?? "";
+    const requestGen = ++modelLoadGenRef.current;
     const modelsUrl = modelCwd ? `/api/models?cwd=${encodeURIComponent(modelCwd)}` : "/api/models";
     const res = await fetch(modelsUrl, signal ? { signal } : undefined);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json() as ModelsResponse;
+    if (signal?.aborted || requestGen !== modelLoadGenRef.current || modelCwdRef.current !== modelCwd) return;
     setModelNames(d.models);
     setModelError(d.modelError ?? null);
     setModelScopeWarnings(d.modelScopeWarnings ?? []);
@@ -1918,29 +2169,28 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     initialThinkingLevelsRef.current = d.initialThinkingLevels ?? {};
     const nextModelList = d.modelList ?? [];
     setModelList(nextModelList);
-    if (thinkingLevelOverrideRef.current === null) {
-      const defaultMatch = d.defaultModel
-        ? nextModelList.find((m) => m.id === d.defaultModel?.modelId && m.provider === d.defaultModel?.provider)
-        : undefined;
-      const defaultDisplayModel = defaultMatch ?? nextModelList[0];
-      const selectedModel = newSessionModelOverrideRef.current;
-      const displayModel = isNew && !sessionIdRef.current
-        ? (nextModelList.find((m) => m.id === selectedModel?.modelId && m.provider === selectedModel?.provider) ?? defaultDisplayModel)
-        : sessionModelRef.current
-          ? nextModelList.find((m) => m.id === sessionModelRef.current?.modelId && m.provider === sessionModelRef.current?.provider)
-            ?? { id: sessionModelRef.current.modelId, name: "", provider: sessionModelRef.current.provider }
+    const defaultMatch = d.defaultModel
+      ? nextModelList.find((m) => m.id === d.defaultModel?.modelId && m.provider === d.defaultModel?.provider)
+      : undefined;
+    const defaultDisplayModel = defaultMatch ?? nextModelList[0];
+    const selectedModel = newSessionModelOverrideRef.current;
+    if (isNew && !sessionIdRef.current) {
+      setNewSessionDefaultModel(defaultDisplayModel ? { provider: defaultDisplayModel.provider, modelId: defaultDisplayModel.id } : null);
+      if (thinkingLevelOverrideRef.current === null) {
+        const displayModel = nextModelList.find((m) => m.id === selectedModel?.modelId && m.provider === selectedModel?.provider) ?? defaultDisplayModel;
+        const preview = displayModel
+          ? initialThinkingLevelsRef.current[`${displayModel.provider}/${displayModel.id}`]
           : undefined;
-      if (isNew && !sessionIdRef.current) {
-        setNewSessionDefaultModel(defaultDisplayModel ? { provider: defaultDisplayModel.provider, modelId: defaultDisplayModel.id } : null);
+        setThinkingLevel((preview ?? "auto") as ThinkingLevelOption);
       }
-      if (displayModel) {
-        const next = isNew && !sessionIdRef.current
-          ? initialThinkingLevelsRef.current[`${displayModel.provider}/${displayModel.id}`] ?? "auto"
-          : desiredThinkingLevel(displayModel.provider, displayModel.id, nextLevels, nextPins);
-        if (next !== "auto" || (isNew && !sessionIdRef.current)) {
-          setThinkingLevel(next as ThinkingLevelOption);
-        }
-      }
+    } else if (sessionIdRef.current && sessionModelRef.current &&
+      (thinkingSourceRef.current === "pending" || thinkingSourceRef.current === "fallback")) {
+      // Model metadata may arrive after the transcript. Fill only its fallback;
+      // persisted, user-selected and live levels remain authoritative.
+      const { provider, modelId } = sessionModelRef.current;
+      const next = desiredThinkingLevel(provider, modelId, nextLevels, nextPins);
+      thinkingSourceRef.current = "fallback";
+      setThinkingLevel(next);
     }
   }, [isNew, newSessionCwd, session?.cwd]);
 
@@ -2183,21 +2433,40 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [applyQueueResult, addNotice, ensureActiveRuntime]);
 
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
+    const sid = sessionIdRef.current;
+    const selectionGen = thinkingSelectionGenRef.current;
+    const userChangeGen = ++thinkingUserChangeGenRef.current;
+    const previousLevel = thinkingLevel;
+    const previousSource = thinkingSourceRef.current;
+    thinkingSourceRef.current = "user";
     setThinkingLevel(level);
-    if (isNew && !sessionIdRef.current) {
-      thinkingLevelOverrideRef.current = level === "auto" ? null : level;
+    if (isNew) thinkingLevelOverrideRef.current = level === "auto" ? null : level;
+    if (level === "auto") {
+      if (sid) explicitSessionThinkingRef.current.delete(sid);
+      return; // "auto" leaves pi's current setting untouched
     }
-    if (level === "auto") return; // "auto" leaves pi's current setting untouched
-    const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
-    if (!sid) return;
+    const targetSid = sid ?? await ensuringNewSessionRef.current;
+    if (!targetSid || sessionIdRef.current !== targetSid || thinkingSelectionGenRef.current !== selectionGen) return;
     try {
-      await ensureActiveRuntime(sid);
-      const result = await sendAgentCommand<{ level?: ThinkingLevelOption }>(sid, { type: "set_thinking_level", level });
-      if (result?.level !== undefined) setThinkingLevel(result.level);
+      await ensureActiveRuntime(targetSid);
+      if (sessionIdRef.current !== targetSid || thinkingSelectionGenRef.current !== selectionGen || thinkingUserChangeGenRef.current !== userChangeGen) return;
+      const result = await sendAgentCommand<{ level?: ThinkingLevelOption }>(targetSid, { type: "set_thinking_level", level });
+      if (sessionIdRef.current !== targetSid || thinkingSelectionGenRef.current !== selectionGen || thinkingUserChangeGenRef.current !== userChangeGen) return;
+      const applied = result?.level ?? level;
+      explicitSessionThinkingRef.current.set(targetSid, applied);
+      thinkingUserChangeGenRef.current += 1;
+      thinkingSourceRef.current = "live";
+      setThinkingLevel(applied);
     } catch (e) {
+      if (sessionIdRef.current === targetSid && thinkingSelectionGenRef.current === selectionGen && thinkingUserChangeGenRef.current === userChangeGen) {
+        thinkingUserChangeGenRef.current += 1;
+        thinkingSourceRef.current = previousSource;
+        setThinkingLevel(previousLevel);
+        void loadSession(targetSid, false, true);
+      }
       console.error("Failed to set thinking level:", e);
     }
-  }, [ensureActiveRuntime, isNew]);
+  }, [ensureActiveRuntime, isNew, loadSession, thinkingLevel]);
 
   const handleToolPresetChange = useCallback(async (preset: ToolPreset) => {
     const toolNames = getToolNamesForPreset(preset);
@@ -2289,9 +2558,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const sid = session?.id ?? null;
     if (loadedSessionIdRef.current === sid) return;
     const previousId = loadedSessionIdRef.current;
+    const ownPromotion = Boolean(sid && previousId === null && newSessionPromotedRef.current && sessionIdRef.current === sid);
     loadedSessionIdRef.current = sid;
     historyRefreshSeenRef.current = false;
     initialScrollDoneRef.current = false;
+    pendingBranchActivationRef.current = null;
+    pendingBranchSelectionRef.current = null;
+    pendingBranchSendRef.current = null;
+    thinkingSelectionGenRef.current += 1;
+    contextLoadGenRef.current += 1;
+    thinkingLevelOverrideRef.current = null;
+    if (!ownPromotion) {
+      promptRunIdRef.current += 1;
+      thinkingSourceRef.current = "pending";
+      sessionModelRef.current = null;
+      lastPromptGenerationRef.current = 0;
+      optimisticUserMessageKeyRef.current = null;
+      setThinkingLevel("auto");
+    }
 
     if (previousId) {
       closeEvents();
@@ -2366,7 +2650,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
         if (agentState.state.contextUsage !== undefined) setContextUsage(agentState.state.contextUsage ?? null);
         if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
-        if (agentState.state.thinkingLevel !== undefined) setThinkingLevel((agentState.state.thinkingLevel as ThinkingLevelOption) ?? "auto");
         if (agentState.state.extensionStatuses !== undefined) setExtensionStatuses(agentState.state.extensionStatuses ?? []);
         if (agentState.state.extensionWidgets !== undefined) setExtensionWidgets(agentState.state.extensionWidgets ?? []);
         if (agentState.state.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(agentState.state.queuedMessages));

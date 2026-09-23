@@ -37,20 +37,19 @@ test("session reloads cannot clear an in-flight optimistic model", () => {
 test("a completed model switch applies server thinking without reloading the session", () => {
   // The switch hands the server's clamped level to the shared helper, which applies
   // the pin rule and only then falls back to the server level.
-  assert.match(switchSource, /await applyDesiredThinkingLevel\(sid, provider, modelId, result\.thinkingLevel\)/);
-  assert.match(thinkingSource, /if \(serverLevel !== undefined\) setThinkingLevel\(serverLevel\)/);
+  assert.match(switchSource, /await applyDesiredThinkingLevel\(sid, provider, modelId, result\.thinkingLevel, modelUserGen\)/);
+  assert.match(thinkingSource, /if \(serverLevel !== undefined && stillCurrent\(\)\) \{[\s\S]*?setThinkingLevel\(serverLevel\)/);
   assert.doesNotMatch(switchSource, /modelSwitchPendingRef\.current = false;\s*await loadSession\(sid\)/);
   assert.match(switchSource, /setCurrentModelOverride\(previousOverride\)/);
   assert.match(switchSource, /Failed to switch model:/);
-  assert.match(switchSource, /await loadSession\(sid\)/);
+  assert.match(switchSource, /await loadSession\(sid, false, true\)/);
 });
 
-test("session reload applies thinking level including off", () => {
-  assert.match(
-    loadSessionSource,
-    /if \(d\.context\.thinkingLevel\) \{\s*setThinkingLevel\(d\.context\.thinkingLevel as ThinkingLevelOption\);/,
-  );
-  assert.doesNotMatch(loadSessionSource, /thinkingLevel !== "off"/);
+test("session reload resolves explicit off before the model fallback", () => {
+  assert.match(loadSessionSource, /const persisted = d\.context\.thinkingLevel/);
+  assert.match(loadSessionSource, /resolveSessionThinkingLevel\(\{ persisted, promoted, fallback \}\)/);
+  assert.match(loadSessionSource, /thinkingSourceRef\.current = persisted \? "persisted" : promoted \? "promoted" : "fallback"/);
+  assert.match(loadSessionSource, /thinkingSourceRef\.current = "live"/);
 });
 
 test("thinking changes adopt the clamped server level", () => {
@@ -58,5 +57,7 @@ test("thinking changes adopt the clamped server level", () => {
     source.indexOf("const handleThinkingLevelChange = useCallback"),
     source.indexOf("const handleToolPresetChange = useCallback"),
   );
-  assert.match(thinkingSource, /if \(result\?\.level !== undefined\) setThinkingLevel\(result\.level\)/);
+  assert.match(thinkingSource, /const applied = result\?\.level \?\? level/);
+  assert.match(thinkingSource, /explicitSessionThinkingRef\.current\.set\(targetSid, applied\)/);
+  assert.match(thinkingSource, /setThinkingLevel\(applied\)/);
 });

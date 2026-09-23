@@ -829,12 +829,13 @@ export class AgentSessionWrapper {
           throw new Error("Cannot navigate while a shell command is running");
         }
         const result = await this.inner.navigateTree(command.targetId as string, {});
-        // Navigation can re-point the session at an older branch whose persisted
-        // thinking level differs from the live one. Report the applied live level
-        // (same source as get_state) so callers never render the stale branch value.
+        // Navigation changes the leaf, but the live model/thinking settings
+        // remain in effect. Report what the next prompt will actually use.
+        const model = this.inner.model;
         return {
           cancelled: result.cancelled,
           thinkingLevel: this.inner.agent.state?.thinkingLevel ?? "off",
+          model: model ? { provider: model.provider, modelId: model.id } : null,
         };
       }
 

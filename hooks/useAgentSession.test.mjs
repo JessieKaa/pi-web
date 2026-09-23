@@ -103,19 +103,19 @@ test("branch navigation awaits the server and reverts the leaf on failure", () =
     source.indexOf("  const handleModelChange = useCallback"),
   );
 
-  assert.match(navigateSource, /await sendAgentCommand\(sid, \{ type: "navigate_tree", targetId: entryId \}\)/);
+  assert.match(navigateSource, /await sendAgentCommand<[^>]+>\(sid, \{ type: "navigate_tree", targetId: entryId \}\)/);
   assert.match(navigateSource, /catch \(error\) \{[\s\S]*?return;?[\s\S]*?\}/);
   assert.ok(
     navigateSource.indexOf("setActiveLeafId(entryId)") > navigateSource.indexOf("navigate_tree"),
     "leaf must switch only after the server accepted the navigation",
   );
   assert.match(leafSource, /sessionRunningRef\.current/);
-  assert.match(leafSource, /await sendAgentCommand\(sid, \{ type: "navigate_tree", targetId: leafId \}\)/);
+  assert.match(leafSource, /await sendAgentCommand<[^>]+>\(sid, \{ type: "navigate_tree", targetId: leafId \}\)/);
   assert.ok(
     leafSource.indexOf("navigate_tree") < leafSource.indexOf("setActiveLeafId(leafId)"),
     "live leaf switch must navigate before changing local state",
   );
-  assert.match(leafSource, /await loadContext\(sid, leafId\)/);
+  assert.match(leafSource, /return loadContext\(sid, leafId, liveLevel, liveModel\)/);
 });
 
 test("reloads the session when the tab becomes visible after a turn", () => {
@@ -132,10 +132,87 @@ test("reloads the session when the tab becomes visible after a turn", () => {
 test("existing sessions keep their model-based thinking fallback while new sessions read the default", () => {
   assert.match(source, /function desiredThinkingLevel\(/);
   assert.match(source, /highestThinkingLevel/);
-  assert.match(source, /else if \(thinkingLevelOverrideRef\.current === null && d\.context\.model\)/);
+  assert.match(source, /resolveSessionThinkingLevel\(\{ persisted, promoted, fallback \}\)/);
   assert.match(source, /initialThinkingLevelsRef\.current = d\.initialThinkingLevels \?\? \{\}/);
   assert.doesNotMatch(source, /thinkingLevelOverrideRef\.current = next/);
   assert.match(source, /type: "set_thinking_level", level: desired/);
+});
+
+test("session selection resets stale thinking while preserving its own draft promotion", () => {
+  const selection = source.slice(source.indexOf("    const previousId = loadedSessionIdRef.current;"), source.indexOf("    if (previousId) {", source.indexOf("    const previousId = loadedSessionIdRef.current;")));
+  assert.match(selection, /newSessionPromotedRef\.current && sessionIdRef\.current === sid/);
+  assert.match(selection, /thinkingSelectionGenRef\.current \+= 1/);
+  assert.match(selection, /thinkingLevelOverrideRef\.current = null/);
+  assert.match(selection, /if \(!ownPromotion\) \{[\s\S]*?setThinkingLevel\("auto"\)/);
+});
+
+test("branch context and model refresh respect the current session's thinking source", () => {
+  const context = source.slice(source.indexOf("const loadContext = useCallback"), source.indexOf("const loadOlderHistory = useCallback"));
+  const models = source.slice(source.indexOf("const loadModels = useCallback"), source.indexOf("const handleBuiltinSlashCommand"));
+  assert.match(context, /contextGen !== contextLoadGenRef\.current/);
+  assert.match(context, /resolveSessionThinkingLevel\(\{ live: liveLevel, persisted, promoted, fallback \}\)/);
+  assert.match(context, /model: selectedModel/);
+  assert.match(models, /signal\?\.aborted \|\| requestGen !== modelLoadGenRef\.current \|\| modelCwdRef\.current !== modelCwd/);
+  assert.match(models, /thinkingSourceRef\.current === "pending" \|\| thinkingSourceRef\.current === "fallback"/);
+  assert.doesNotMatch(models, /thinkingSourceRef\.current = "live"/);
+});
+
+test("late history and state responses cannot revert a user-selected thinking level", () => {
+  const load = source.slice(source.indexOf("const loadSession = useCallback"), source.indexOf("const loadOlderHistory = useCallback"));
+  const change = source.slice(source.indexOf("const handleThinkingLevelChange = useCallback"), source.indexOf("const handleToolPresetChange = useCallback"));
+  assert.match(load, /const userChangeGen = thinkingUserChangeGenRef\.current/);
+  assert.match(load, /userChangeGen === thinkingUserChangeGenRef\.current && thinkingSourceRef\.current !== "user"/);
+  assert.match(load, /if \(userChangeGen === thinkingUserChangeGenRef\.current\) \{[\s\S]*?resolveSessionThinkingLevel\(\{ live: liveLevel/);
+  assert.match(change, /const userChangeGen = \+\+thinkingUserChangeGenRef\.current/);
+  assert.match(change, /thinkingUserChangeGenRef\.current \+= 1;[\s\S]*?thinkingSourceRef\.current = "live"/);
+  assert.match(change, /catch \(e\) \{[\s\S]*?thinkingSourceRef\.current = previousSource;[\s\S]*?setThinkingLevel\(previousLevel\);[\s\S]*?loadSession\(targetSid, false, true\)/);
+});
+
+test("session changes reset per-session SSE counters without dropping promoted prompt echoes", () => {
+  const start = source.indexOf("const ownPromotion = Boolean(");
+  const effect = source.slice(start, source.indexOf("if (previousId)", start));
+  assert.match(effect, /if \(!ownPromotion\) \{[\s\S]*?lastPromptGenerationRef\.current = 0;[\s\S]*?optimisticUserMessageKeyRef\.current = null/);
+});
+
+test("failed model changes and abandoned navigation models allow live reconciliation", () => {
+  const model = source.slice(source.indexOf("const handleModelChange = useCallback"), source.indexOf("const handleThinkingLevelChange = useCallback"));
+  assert.match(model, /const abandonSwitch = \(\) => \{[\s\S]*?setCurrentModelOverride\(previousOverride\)/);
+  assert.match(model, /loadSessionGenRef\.current \+= 1;[\s\S]*?modelSwitchPendingRef\.current = true/);
+  assert.match(model, /thinkingSourceRef\.current = "fallback";[\s\S]*?await loadSession\(sid, false, true\)/);
+});
+
+test("late prompt acknowledgments and idle watchers cannot touch a different session", () => {
+  const send = source.slice(source.indexOf("const handleSend = useCallback"), source.indexOf("const executeBash = useCallback"));
+  const settle = source.slice(source.indexOf("const finishPromptWithoutStream = useCallback"), source.indexOf("const waitForBashSettlement = useCallback"));
+  assert.match(send, /if \(sessionIdRef\.current !== sid \|\| thinkingSelectionGenRef\.current !== submissionSelectionGen\) return;[\s\S]*?lastPromptGenerationRef\.current = promptResult\.promptGeneration/);
+  assert.match(send, /if \(sessionIdRef\.current !== session\.id \|\| thinkingSelectionGenRef\.current !== submissionSelectionGen\) return;[\s\S]*?lastPromptGenerationRef\.current = promptResult\.promptGeneration/);
+  assert.match(settle, /if \(promptRunIdRef\.current !== runId \|\| sid !== sessionIdRef\.current\) return/g);
+  assert.match(settle, /if \(sessionIdRef\.current !== sid \|\| \(runId !== undefined && promptRunIdRef\.current !== runId\)\) return/);
+});
+
+test("branch clicks during active generation leave the selected branch unchanged", () => {
+  const navigate = source.slice(source.indexOf("const handleNavigate = useCallback"), source.indexOf("const handleLeafChange = useCallback"));
+  const leaf = source.slice(source.indexOf("const handleLeafChange = useCallback"), source.indexOf("const applyDesiredThinkingLevel = useCallback"));
+  for (const handler of [navigate, leaf]) {
+    assert.match(handler, /if \(agentRunningRef\.current \|\| rpcPromptPendingRef\.current \|\| sdkAgentActiveRef\.current\) \{[\s\S]*?return;/);
+    assert.match(handler, /contextLoadGenRef\.current \+= 1/);
+  }
+});
+
+test("live thinking events and cold branch activation follow the selected session", () => {
+  const events = source.slice(source.indexOf("const handleAgentEvent = useCallback"), source.indexOf("const handleSend = useCallback"));
+  const send = source.slice(source.indexOf("const handleSend = useCallback"), source.indexOf("const executeBash = useCallback"));
+  const leaf = source.slice(source.indexOf("const handleLeafChange = useCallback"), source.indexOf("const applyDesiredThinkingLevel = useCallback"));
+  assert.match(events, /case "thinking_level_changed":/);
+  assert.match(events, /thinkingSourceRef\.current = "live";\s*setThinkingLevel\(event\.level/);
+  assert.match(leaf, /pendingBranchActivationRef\.current = leafId && liveLevel === undefined \? \{ sid, leafId \} : null/);
+  assert.match(send, /const pendingSelection = pendingBranchSelectionRef\.current;[\s\S]*?const ready = await pendingSelection;[\s\S]*?if \(!ready/);
+  const activation = send.indexOf("const pendingBranch = pendingBranchActivationRef.current");
+  assert.ok(activation > send.indexOf("await ensureActiveRuntime(session.id, true)"));
+  assert.ok(activation < send.indexOf('type: "prompt"', activation));
+  assert.match(send.slice(activation), /type: "navigate_tree", targetId: pendingBranch\.leafId/);
+  assert.match(send.slice(activation), /thinkingUserChangeGenRef\.current \+= 1/);
+  assert.match(send.slice(activation), /sessionModelRef\.current = navigation\.model/);
 });
 
 test("a rejected submission preserves a different run reported by the server", () => {
