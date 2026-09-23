@@ -1,7 +1,9 @@
 import { stat } from "fs/promises";
-import { resolve } from "path";
-import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
+import { join, resolve } from "path";
+import { CONFIG_DIR_NAME, createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { initialThinkingLevelForModel } from "@/lib/model-initial-thinking";
 import {
   loadModelsWithCache,
   withModelRuntimeError,
@@ -14,6 +16,28 @@ import { projectTrustReloadOptions } from "@/lib/project-trust";
 
 
 const modelNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+async function settingsFileRevision(path: string): Promise<string> {
+  try {
+    const file = await stat(path);
+    return `${file.dev}:${file.ino}:${file.size}:${file.mtimeMs}:${file.ctimeMs}`;
+  } catch (error) {
+    // SettingsManager handles unreadable files. Skip caching this response so
+    // permissions changing later cannot leave a stale preview or hide models.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+    return "error";
+  }
+}
+
+async function modelConfigurationRevision(cwd: string): Promise<string> {
+  const agentDir = getAgentDir();
+  const revisions = await Promise.all([
+    settingsFileRevision(join(agentDir, "settings.json")),
+    settingsFileRevision(join(cwd, CONFIG_DIR_NAME, "settings.json")),
+    settingsFileRevision(join(agentDir, "trust.json")),
+  ]);
+  return revisions.join("|");
+}
 
 function compareModelEntries(
   a: { id: string; name: string; provider: string },
@@ -30,6 +54,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
   let defaultModel: { provider: string; modelId: string } | null = null;
   const thinkingLevels: Record<string, string[]> = {};
   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
+  const initialThinkingLevels: Record<string, string> = {};
 
   const agentDir = getAgentDir();
   // Gate untrusted project extensions: enumerating models still imports and
@@ -59,6 +84,13 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     const key = `${m.provider}:${m.id}`;
     nameMap.set(key, m.name);
     thinkingLevels[key] = getSupportedThinkingLevels(m);
+    // Match the SDK's startup precedence without writing the global setting.
+    initialThinkingLevels[`${m.provider}/${m.id}`] = initialThinkingLevelForModel(
+      m,
+      thinkingLevelPins[`${m.provider}/${m.id}`] as ThinkingLevel | undefined,
+      settings.getModelThinkingLevel(m.provider, m.id),
+      settings.getDefaultThinkingLevel(),
+    );
     if (m.thinkingLevelMap) thinkingLevelMaps[key] = m.thinkingLevelMap;
   }
 
@@ -81,6 +113,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
       thinkingLevels,
       thinkingLevelMaps,
       thinkingLevelPins,
+      initialThinkingLevels,
       ...(warnings.length > 0 ? { modelScopeWarnings: warnings } : {}),
     },
     modelError,
@@ -94,6 +127,7 @@ const EMPTY_MODELS: ModelsData = {
   thinkingLevels: {},
   thinkingLevelMaps: {},
   thinkingLevelPins: {},
+  initialThinkingLevels: {},
 };
 
 export async function GET(req: Request) {
@@ -115,7 +149,13 @@ export async function GET(req: Request) {
   }
 
   try {
-    return Response.json(await loadModelsWithCache(cwd, () => loadModels(cwd)));
+    // External settings edits change the cache key so the preview reads the
+    // same defaults a newly constructed SDK session will read.
+    const revision = await modelConfigurationRevision(cwd);
+    const data = revision.split("|").includes("error")
+      ? await loadModels(cwd)
+      : await loadModelsWithCache(`${cwd}\0${revision}`, () => loadModels(cwd));
+    return Response.json(data);
   } catch {
     return Response.json(withSafeModelLoadFailure(EMPTY_MODELS));
   }

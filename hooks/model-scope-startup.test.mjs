@@ -46,11 +46,31 @@ test("model-list refresh does not overwrite a live session or explicit thinking 
     loadModelsSource,
     /thinkingLevelOverrideRef\.current === null/,
   );
-  // The pin rule now lives in the shared desiredThinkingLevel helper: assert the
-  // refresh path feeds it the pins instead of re-deriving the rule here.
-  assert.match(
-    loadModelsSource,
-    /const next = desiredThinkingLevel\(displayModel\.provider, displayModel\.id, nextLevels, nextPins\)/,
+  assert.match(loadModelsSource, /initialThinkingLevelsRef\.current = d\.initialThinkingLevels \?\? \{\}/);
+  assert.match(loadModelsSource, /const selectedModel = newSessionModelOverrideRef\.current/);
+  assert.match(loadModelsSource, /setNewSessionDefaultModel\(defaultDisplayModel \?/);
+  assert.match(loadModelsSource, /initialThinkingLevelsRef\.current\[`\$\{displayModel\.provider\}\/\$\{displayModel\.id\}`\]/);
+  assert.doesNotMatch(loadModelsSource, /thinkingLevelOverrideRef\.current = next/);
+});
+
+test("prompting an already-created new session preserves explicit thinking and scope pins", () => {
+  const promptSource = source.slice(
+    source.indexOf("const handleSend"),
+    source.indexOf("const handleModelChange"),
   );
-  assert.match(loadModelsSource, /if \(next !== "auto"\) \{/);
+  assert.match(promptSource, /if \(existingSid\) \{[\s\S]*?type: "set_model"/);
+  assert.match(promptSource, /thinkingLevelOverrideRef\.current\s*\?\? \(modelThinkingLevelPinsRef\.current/);
+  assert.match(promptSource, /type: "set_thinking_level", level: selectedLevel/);
+});
+
+test("selecting a model in a new session previews the read-only default", () => {
+  const modelChangeSource = source.slice(
+    source.indexOf("const handleModelChange"),
+    source.indexOf("const handleCompact"),
+  );
+  assert.match(modelChangeSource, /if \(thinkingLevelOverrideRef\.current === null\)/);
+  assert.match(modelChangeSource, /initialThinkingLevelsRef\.current\[`\$\{provider\}\/\$\{modelId\}`\]/);
+  assert.match(modelChangeSource, /thinkingLevelOverrideRef\.current\s*\?\? \(modelThinkingLevelPinsRef\.current/);
+  assert.match(modelChangeSource, /type: "set_thinking_level", level: selectedLevel/);
+  assert.doesNotMatch(modelChangeSource, /applyDesiredThinkingLevel\(null/);
 });

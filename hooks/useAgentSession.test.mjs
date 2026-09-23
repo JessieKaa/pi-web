@@ -129,11 +129,12 @@ test("reloads the session when the tab becomes visible after a turn", () => {
   assert.match(recoverySource, /agentRunning\s*\?\s*setInterval\(sync, AGENT_STATE_RECONCILE_MS\)/);
 });
 
-test("defaults thinking to the model's highest level when jsonl never set one", () => {
+test("existing sessions keep their model-based thinking fallback while new sessions read the default", () => {
   assert.match(source, /function desiredThinkingLevel\(/);
   assert.match(source, /highestThinkingLevel/);
   assert.match(source, /else if \(thinkingLevelOverrideRef\.current === null && d\.context\.model\)/);
-  assert.match(source, /if \(isNew && !sessionIdRef\.current\) thinkingLevelOverrideRef\.current = next/);
+  assert.match(source, /initialThinkingLevelsRef\.current = d\.initialThinkingLevels \?\? \{\}/);
+  assert.doesNotMatch(source, /thinkingLevelOverrideRef\.current = next/);
   assert.match(source, /type: "set_thinking_level", level: desired/);
 });
 

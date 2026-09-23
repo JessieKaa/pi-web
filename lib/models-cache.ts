@@ -6,6 +6,8 @@ export interface ModelsData {
   thinkingLevelMaps: Record<string, Record<string, string | null>>;
   /** `provider/modelId` → thinking level pinned by an `enabledModels` `:level` suffix. */
   thinkingLevelPins: Record<string, string>;
+  /** Effective initial level per model, respecting scope pins, per-model settings, and the read-only global default. */
+  initialThinkingLevels: Record<string, string>;
   modelError?: string;
   /** Warnings from resolving the `enabledModels` scope (e.g. a pattern matched nothing). */
   modelScopeWarnings?: string[];

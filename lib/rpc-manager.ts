@@ -2153,16 +2153,11 @@ export async function startRpcSession(
     try {
       const persistedPreferences = await persistExplicitStartupPreferences(
         services.settingsManager,
-        {
-          ...(initialModel ? { model: initialModel } : {}),
-          ...(thinkingLevel ? { thinkingLevel } : {}),
-        },
+        { ...(initialModel ? { model: initialModel } : {}) },
         {
           ...(inner.model
             ? { model: { provider: inner.model.provider, modelId: inner.model.id } }
             : {}),
-          thinkingLevel: inner.thinkingLevel,
-          supportsThinking: inner.supportsThinking(),
         },
       );
       if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();

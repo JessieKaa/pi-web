@@ -279,6 +279,7 @@ type ModelsResponse = {
   thinkingLevels?: Record<string, string[]>;
   thinkingLevelMaps?: Record<string, Record<string, string | null>>;
   thinkingLevelPins?: Record<string, string>;
+  initialThinkingLevels?: Record<string, string>;
   modelError?: string;
   modelScopeWarnings?: string[];
 };
@@ -421,6 +422,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const thinkingLevelOverrideRef = useRef<Exclude<ThinkingLevelOption, "auto"> | null>(null);
   const modelThinkingLevelsRef = useRef<Record<string, string[]>>({});
   const modelThinkingLevelPinsRef = useRef<Record<string, string>>({});
+  const initialThinkingLevelsRef = useRef<Record<string, string>>({});
   const sessionModelRef = useRef<{ provider: string; modelId: string } | null>(null);
   const promptRunIdRef = useRef(0);
   const agentLifecycleGenerationRef = useRef(0);
@@ -1629,7 +1631,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (selectedModel) {
           setPendingModel(selectedModel);
           if (existingSid) {
-            await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
+            const result = await sendAgentCommand<{ thinkingLevel?: ThinkingLevelOption }>(sid, {
+              type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId,
+            });
+            const selectedLevel = thinkingLevelOverrideRef.current
+              ?? (modelThinkingLevelPinsRef.current[`${selectedModel.provider}/${selectedModel.modelId}`] as ThinkingLevelOption | undefined);
+            if (selectedLevel && selectedLevel !== result.thinkingLevel) {
+              const applied = await sendAgentCommand<{ level?: ThinkingLevelOption }>(sid, { type: "set_thinking_level", level: selectedLevel });
+              setThinkingLevel(applied?.level ?? selectedLevel);
+            } else if (result.thinkingLevel !== undefined) {
+              setThinkingLevel(result.thinkingLevel);
+            }
           }
         }
         await ensureActiveRuntime(sid, true);
@@ -1802,20 +1814,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     await loadContext(sid, leafId);
   }, [ensureActiveRuntime, loadContext]);
 
-  const applyDesiredThinkingLevel = useCallback(async (sid: string | null, provider: string, modelId: string, serverLevel?: ThinkingLevelOption) => {
+  const applyDesiredThinkingLevel = useCallback(async (sid: string, provider: string, modelId: string, serverLevel?: ThinkingLevelOption) => {
     const desired = desiredThinkingLevel(
       provider,
       modelId,
       modelThinkingLevelsRef.current,
       modelThinkingLevelPinsRef.current,
     );
-    if (!sid) {
-      if (desired !== "auto") {
-        setThinkingLevel(desired);
-        thinkingLevelOverrideRef.current = desired;
-      }
-      return;
-    }
     if (desired !== "auto" && desired !== serverLevel) {
       await ensureActiveRuntime(sid);
       const applied = await sendAgentCommand<{ level?: ThinkingLevelOption }>(sid, { type: "set_thinking_level", level: desired });
@@ -1833,13 +1838,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setPendingModel(selectedModel);
       const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
       if (!sid) {
-        await applyDesiredThinkingLevel(null, provider, modelId);
+        if (thinkingLevelOverrideRef.current === null) {
+          // With missing model metadata, "auto" leaves the level to the SDK at startup.
+          setThinkingLevel((initialThinkingLevelsRef.current[`${provider}/${modelId}`] as ThinkingLevelOption | undefined) ?? "auto");
+        }
         return;
       }
       try {
         await ensureActiveRuntime(sid);
         const result = await sendAgentCommand<{ thinkingLevel?: ThinkingLevelOption }>(sid, { type: "set_model", provider, modelId });
-        await applyDesiredThinkingLevel(sid, provider, modelId, result.thinkingLevel);
+        const selectedLevel = thinkingLevelOverrideRef.current
+          ?? (modelThinkingLevelPinsRef.current[`${provider}/${modelId}`] as ThinkingLevelOption | undefined);
+        if (selectedLevel && selectedLevel !== result.thinkingLevel) {
+          const applied = await sendAgentCommand<{ level?: ThinkingLevelOption }>(sid, { type: "set_thinking_level", level: selectedLevel });
+          setThinkingLevel(applied?.level ?? selectedLevel);
+        } else if (result.thinkingLevel !== undefined) {
+          setThinkingLevel(result.thinkingLevel);
+        }
       } catch (e) {
         console.error("Failed to set model:", e);
       }
@@ -1908,26 +1923,30 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setModelThinkingLevelMaps(d.thinkingLevelMaps ?? {});
     modelThinkingLevelsRef.current = nextLevels;
     modelThinkingLevelPinsRef.current = nextPins;
+    initialThinkingLevelsRef.current = d.initialThinkingLevels ?? {};
     const nextModelList = d.modelList ?? [];
     setModelList(nextModelList);
     if (thinkingLevelOverrideRef.current === null) {
-      const match = d.defaultModel
+      const defaultMatch = d.defaultModel
         ? nextModelList.find((m) => m.id === d.defaultModel?.modelId && m.provider === d.defaultModel?.provider)
         : undefined;
+      const defaultDisplayModel = defaultMatch ?? nextModelList[0];
+      const selectedModel = newSessionModelOverrideRef.current;
       const displayModel = isNew && !sessionIdRef.current
-        ? (match ?? nextModelList[0])
+        ? (nextModelList.find((m) => m.id === selectedModel?.modelId && m.provider === selectedModel?.provider) ?? defaultDisplayModel)
         : sessionModelRef.current
           ? nextModelList.find((m) => m.id === sessionModelRef.current?.modelId && m.provider === sessionModelRef.current?.provider)
             ?? { id: sessionModelRef.current.modelId, name: "", provider: sessionModelRef.current.provider }
           : undefined;
       if (isNew && !sessionIdRef.current) {
-        setNewSessionDefaultModel(displayModel ? { provider: displayModel.provider, modelId: displayModel.id } : null);
+        setNewSessionDefaultModel(defaultDisplayModel ? { provider: defaultDisplayModel.provider, modelId: defaultDisplayModel.id } : null);
       }
       if (displayModel) {
-        const next = desiredThinkingLevel(displayModel.provider, displayModel.id, nextLevels, nextPins);
-        if (next !== "auto") {
-          setThinkingLevel(next);
-          if (isNew && !sessionIdRef.current) thinkingLevelOverrideRef.current = next;
+        const next = isNew && !sessionIdRef.current
+          ? initialThinkingLevelsRef.current[`${displayModel.provider}/${displayModel.id}`] ?? "auto"
+          : desiredThinkingLevel(displayModel.provider, displayModel.id, nextLevels, nextPins);
+        if (next !== "auto" || (isNew && !sessionIdRef.current)) {
+          setThinkingLevel(next as ThinkingLevelOption);
         }
       }
     }
