@@ -2,6 +2,43 @@ export const THINKING_LEVEL_RANK = ["off", "minimal", "low", "medium", "high", "
 
 export type RankedThinkingLevel = (typeof THINKING_LEVEL_RANK)[number];
 
+/**
+ * Candidate sources for a session's effective thinking level, ordered from the
+ * most authoritative (live runtime state) to the weakest (a static fallback).
+ */
+export interface SessionThinkingLevelSources {
+  live?: string | null;
+  persisted?: string | null;
+  promoted?: string | null;
+  fallback?: string | null;
+}
+
+/**
+ * `""` and `"auto"` mean "no explicit choice here", so they fall through to
+ * the next source. `"off"` is a real value and must be preserved.
+ */
+const ABSENT_THINKING_LEVEL_SIGNALS = new Set(["", "auto"]);
+
+function presentThinkingLevel(value: string | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  return ABSENT_THINKING_LEVEL_SIGNALS.has(value) ? undefined : value;
+}
+
+/**
+ * Pure resolver for a session's effective thinking level. Precedence is
+ * live > persisted > promoted > fallback > `"auto"`; empty strings and
+ * `"auto"` are treated as absent signals, while `"off"` is a real value.
+ */
+export function resolveSessionThinkingLevel(sources: SessionThinkingLevelSources): string {
+  return (
+    presentThinkingLevel(sources.live)
+    ?? presentThinkingLevel(sources.persisted)
+    ?? presentThinkingLevel(sources.promoted)
+    ?? presentThinkingLevel(sources.fallback)
+    ?? "auto"
+  );
+}
+
 export function highestThinkingLevel(
   levels: readonly string[] | null | undefined,
 ): RankedThinkingLevel | "auto" {
