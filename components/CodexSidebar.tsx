@@ -1261,9 +1261,9 @@ function SessionRow({ session, selected, running, unread, variant = "nested", pi
             <span className={`codex-session-title${isRecent ? " codex-recent-session-title" : ""}`}>{title}</span>
       </button>
       )}
-      {isRecent && onTogglePinned && (
-        <IconButton label={pinned ? t("sidebar.unpin") : t("sidebar.pin")} onClick={onTogglePinned}>
-          <Pin size={13} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} aria-hidden="true" />
+      {isRecent && pinned && onTogglePinned && (
+        <IconButton label={t("sidebar.unpin")} onClick={onTogglePinned}>
+          <Pin size={13} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />
         </IconButton>
       )}
       {isRecent && relativeTime ? <span className="codex-recent-session-time">{relativeTime}</span> : null}
@@ -1280,6 +1280,9 @@ function SessionRow({ session, selected, running, unread, variant = "nested", pi
           </IconButton>
           {menuPos && createPortal(
             <div ref={menuRef} className="codex-project-menu codex-project-menu-portal" role="menu" style={{ left: menuPos.left, top: menuPos.top }}>
+              {isRecent && !pinned && onTogglePinned && (
+                <button type="button" role="menuitem" onClick={() => { setMenuPos(null); onTogglePinned(); }}><Pin size={14} aria-hidden="true" />{t("sidebar.pin")}</button>
+              )}
               <button type="button" role="menuitem" onClick={() => { setValue(title); setRenaming(true); setMenuPos(null); }}><Pencil size={14} aria-hidden="true" />{t("sidebar.rename")}</button>
               <button type="button" role="menuitem" onClick={() => { setMenuPos(null); onArchive(); }}><Archive size={14} aria-hidden="true" />{t("sidebar.archiveSession")}</button>
               <button type="button" role="menuitem" className="danger" onClick={() => { setMenuPos(null); setDeleteError(null); void remove(); }}><Trash2 size={14} aria-hidden="true" />{t("sidebar.delete")}</button>

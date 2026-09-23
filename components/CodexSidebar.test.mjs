@@ -216,6 +216,13 @@ test("recent sessions are grouped by project and preserve activity and session m
   assert.match(sidebar, /pi-web:recent-open/);
 });
 
+test("recent session pin appears inline only after pinning through the overflow menu", () => {
+  const sessionRow = sidebar.slice(sidebar.indexOf("function SessionRow("));
+  assert.match(sessionRow, /\{isRecent && pinned && onTogglePinned && \([\s\S]*?label=\{t\("sidebar\.unpin"\)\}[\s\S]*?<Pin size=\{13\}[^>]*fill="currentColor"/);
+  assert.match(sessionRow, /\{isRecent && !pinned && onTogglePinned && \([\s\S]*?role="menuitem"[^>]*onClick=\{\(\) => \{ setMenuPos\(null\); onTogglePinned\(\); \}\}[^>]*><Pin size=\{14\}[^>]*>\{t\("sidebar\.pin"\)\}/);
+  assert.doesNotMatch(sessionRow, /label=\{pinned \? t\("sidebar\.unpin"\) : t\("sidebar\.pin"\)\}/);
+});
+
 test("desktop sidebar rows keep more air without changing type", () => {
   assert.match(styles, /\.codex-sidebar-section-heading \{[\s\S]*?height: 36px;/);
   assert.doesNotMatch(styles, /\.codex-sidebar-recent \{[^}]*border-bottom:/);
